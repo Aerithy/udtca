@@ -57,9 +57,17 @@ torchrun --nproc_per_node=4 experiments/run_llama7b_dp_pp.py \
   --methods none bitscom quant8
 ```
 
+Control steps per epoch:
+```
+torchrun --nproc_per_node=4 experiments/run_llama7b_dp_pp.py \
+  --pp-size 2 \
+  --steps-per-epoch 100
+```
+
 Notes:
 - Llama7B defaults to WikiText-103 (switch to wikitext-2 or c4 via flags).
 - Downloads are enabled by default; pass --no-download to use cache only.
+- Pipeline schedule uses 1F1B.
 - Loss curves are stored per method; throughput is tokens/sec.
 - For ResNet50 throughput is samples/sec; for BERT/GPT-2 it is tokens/sec.
 - bitscom runs are stored under experiments/results/bitscom.

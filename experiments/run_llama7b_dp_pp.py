@@ -7,7 +7,7 @@ import torch
 import torch.distributed as dist
 import torch.nn.functional as F
 from torch.distributed.device_mesh import init_device_mesh
-from torch.distributed.pipelining import PipelineStage, ScheduleGPipe
+from torch.distributed.pipelining import PipelineStage, Schedule1F1B
 from torch.utils.data import DataLoader, Dataset
 from datasets import DownloadConfig, load_dataset
 from transformers import AutoTokenizer
@@ -210,6 +210,7 @@ def main() -> None:
     parser.add_argument("--no-download", action="store_true")
     parser.add_argument("--pp-size", type=int, default=1)
     parser.add_argument("--micro-batches", type=int, default=4)
+    parser.add_argument("--steps-per-epoch", type=int, default=200)
     parser.add_argument("--max-steps", type=int, default=200)
     parser.add_argument("--methods", nargs="+", default=["none", "quant8", "topk", "powersgd", "bitscom"])
     parser.add_argument("--bitwidth", type=int, default=4)
@@ -320,58 +321,73 @@ def main() -> None:
                 f"[warn] micro-batches {args.micro_batches} > batch-size {args.batch_size}; "
                 f"clamping to {micro_batches}"
             )
-        schedule = ScheduleGPipe(stage, n_microbatches=micro_batches, loss_fn=loss_fn)
+        schedule = Schedule1F1B(stage, n_microbatches=micro_batches, loss_fn=loss_fn)
 
         global_step = 0
         losses: List[float] = []
         step_times: List[float] = []
 
-        if stage.is_last:
-            pbar = tqdm(dataloader, desc=f"Llama7B {method}")
-        else:
-            pbar = dataloader
-
-        for batch in pbar:
-            if global_step >= args.max_steps:
-                break
-
-            t0 = time.perf_counter()
-            input_ids = batch["input_ids"].to(device)
-            labels = batch["labels"].to(device) if stage.is_last else None
-            attention_mask = batch["attention_mask"].to(device)
-
-            optimizer.zero_grad(set_to_none=True)
-
-            if stage.is_first:
-                schedule.step(input_ids, attention_mask=attention_mask)
-            elif stage.is_last:
-                step_losses: List[torch.Tensor] = []
-                schedule.step(target=labels, losses=step_losses, attention_mask=attention_mask)
-                loss = torch.stack(step_losses).mean()
-                loss_tensor = loss.detach().to(torch.float32)
-                dist.all_reduce(loss_tensor, op=dist.ReduceOp.SUM, group=dp_group)
-                loss_tensor.div_(dp_world)
-                losses.append(float(loss_tensor.item()))
-                pbar.set_postfix({"loss": f"{loss.item():.4f}"})
-            else:
-                schedule.step(attention_mask=attention_mask)
-
-            grads = [p.grad for p in stage.submod.parameters() if p.grad is not None]
-            sync_grads_bucketed(
-                grads=grads,
-                group=dp_group,
-                world_size=dp_world,
-                cfg=cfg,
-                bucket_numel=args.bucket_numel,
-                lowbit_group=lowbit_group,
-            )
-
-            optimizer.step()
-            global_step += 1
-
+        steps_per_epoch = max(1, int(args.steps_per_epoch))
+        for epoch in range(int(args.epochs)):
+            step_in_epoch = 0
             if stage.is_last:
-                torch.cuda.synchronize(device)
-                step_times.append(time.perf_counter() - t0)
+                pbar = tqdm(
+                    dataloader,
+                    desc=f"Llama7B {method} [epoch {epoch + 1}/{args.epochs}]",
+                )
+                epoch_iter = pbar
+            else:
+                epoch_iter = dataloader
+                pbar = None
+
+            for batch in epoch_iter:
+                if args.max_steps > 0 and global_step >= args.max_steps:
+                    break
+                if step_in_epoch >= steps_per_epoch:
+                    break
+
+                t0 = time.perf_counter()
+                input_ids = batch["input_ids"].to(device)
+                labels = batch["labels"].to(device) if stage.is_last else None
+                attention_mask = batch["attention_mask"].to(device)
+
+                optimizer.zero_grad(set_to_none=True)
+
+                if stage.is_first:
+                    schedule.step(input_ids, attention_mask=attention_mask)
+                elif stage.is_last:
+                    step_losses: List[torch.Tensor] = []
+                    schedule.step(target=labels, losses=step_losses, attention_mask=attention_mask)
+                    loss = torch.stack(step_losses).mean()
+                    loss_tensor = loss.detach().to(torch.float32)
+                    dist.all_reduce(loss_tensor, op=dist.ReduceOp.SUM, group=dp_group)
+                    loss_tensor.div_(dp_world)
+                    losses.append(float(loss_tensor.item()))
+                    if pbar is not None:
+                        pbar.set_postfix({"loss": f"{loss.item():.4f}"})
+                else:
+                    schedule.step(attention_mask=attention_mask)
+
+                grads = [p.grad for p in stage.submod.parameters() if p.grad is not None]
+                sync_grads_bucketed(
+                    grads=grads,
+                    group=dp_group,
+                    world_size=dp_world,
+                    cfg=cfg,
+                    bucket_numel=args.bucket_numel,
+                    lowbit_group=lowbit_group,
+                )
+
+                optimizer.step()
+                global_step += 1
+                step_in_epoch += 1
+
+                if stage.is_last:
+                    torch.cuda.synchronize(device)
+                    step_times.append(time.perf_counter() - t0)
+
+            if args.max_steps > 0 and global_step >= args.max_steps:
+                break
 
         if stage.is_last and dp_rank == 0:
             total_time = sum(step_times)

@@ -58,9 +58,17 @@ torchrun --nproc_per_node=4 experiments/run_llama7b_dp_pp.py \
   --methods none bitscom quant8
 ```
 
+控制每个 epoch 的 step 数量：
+```
+torchrun --nproc_per_node=4 experiments/run_llama7b_dp_pp.py \
+  --pp-size 2 \
+  --steps-per-epoch 100
+```
+
 注意：
 - Llama7B 默认使用 WikiText-103（可切换为 wikitext-2 或 c4）。
 - 默认允许下载；需要仅使用缓存请加 --no-download。
+- 流水线调度采用 1F1B。
 - loss 曲线按方法分别保存；吞吐率为 tokens/sec。
 - ResNet50 吞吐率为 samples/sec；BERT/GPT-2 为 tokens/sec。
 - bitscom 相关结果会单独存放在 experiments/results/bitscom。
