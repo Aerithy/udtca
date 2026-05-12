@@ -208,7 +208,7 @@ def main() -> None:
     parser.add_argument("--use-auth-token", action="store_true")
     parser.add_argument("--no-download", action="store_true")
     parser.add_argument("--pp-size", type=int, default=1)
-    parser.add_argument("--micro-batches", type=int, default=1)
+    parser.add_argument("--micro-batches", type=int, default=4)
     parser.add_argument("--max-steps", type=int, default=200)
     parser.add_argument("--methods", nargs="+", default=["none", "quant8", "topk", "powersgd", "bitscom"])
     parser.add_argument("--bitwidth", type=int, default=4)
@@ -228,6 +228,13 @@ def main() -> None:
     pp_size = args.pp_size
     if world_size % pp_size != 0:
         raise RuntimeError(f"world_size {world_size} must be divisible by pp_size {pp_size}")
+
+    if args.micro_batches < pp_size:
+        args.micro_batches = pp_size
+        if dist.get_rank() == 0:
+            print(
+                f"[warn] micro-batches < pp-size; bump to {args.micro_batches} to satisfy GPipe"
+            )
 
     dp_size = world_size // pp_size
     device_mesh = init_device_mesh("cuda", (dp_size, pp_size), mesh_dim_names=("dp", "pp"))
