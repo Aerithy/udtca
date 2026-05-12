@@ -193,16 +193,6 @@ def init_llama_weights(module: nn.Module) -> None:
         nn.init.ones_(module.weight)
 
 
-def loss_fn(output, target):
-    shift_logits = output[..., :-1, :].contiguous()
-    shift_labels = target[..., 1:].contiguous()
-    return F.cross_entropy(
-        shift_logits.view(-1, shift_logits.size(-1)),
-        shift_labels.view(-1),
-        ignore_index=0,
-    )
-
-
 def _method_dir(base: str, method: str) -> str:
     return os.path.join(base, "bitscom" if method == "bitscom" else "baselines")
 
@@ -265,7 +255,7 @@ def main() -> None:
     else:
         lowbit_group = None
 
-    dataloader, _ = get_dataloader(
+    dataloader, tokenizer = get_dataloader(
         pp_size=pp_size,
         dataset_name=args.dataset,
         dataset_config=args.dataset_config,
@@ -277,6 +267,19 @@ def main() -> None:
         use_auth_token=args.use_auth_token,
         allow_download=not args.no_download,
     )
+
+    pad_token_id = tokenizer.pad_token_id
+    if pad_token_id is None:
+        pad_token_id = 0
+
+    def loss_fn(output, target):
+        shift_logits = output[..., :-1, :].contiguous()
+        shift_labels = target[..., 1:].contiguous()
+        return F.cross_entropy(
+            shift_logits.view(-1, shift_logits.size(-1)),
+            shift_labels.view(-1),
+            ignore_index=pad_token_id,
+        )
 
     dp_group = dp_mesh.get_group()
     dp_world = dist.get_world_size(dp_group)
