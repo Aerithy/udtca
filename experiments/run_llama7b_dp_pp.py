@@ -309,7 +309,18 @@ def main() -> None:
         )
 
         optimizer = torch.optim.AdamW(stage.submod.parameters(), lr=args.lr)
-        schedule = ScheduleGPipe(stage, n_microbatches=args.micro_batches, loss_fn=loss_fn)
+        micro_batches = min(int(args.micro_batches), int(args.batch_size))
+        if micro_batches < pp_size:
+            raise ValueError(
+                "micro-batches must be >= pp-size; "
+                "increase --batch-size or reduce --pp-size"
+            )
+        if micro_batches != args.micro_batches and dist.get_rank() == 0:
+            print(
+                f"[warn] micro-batches {args.micro_batches} > batch-size {args.batch_size}; "
+                f"clamping to {micro_batches}"
+            )
+        schedule = ScheduleGPipe(stage, n_microbatches=micro_batches, loss_fn=loss_fn)
 
         global_step = 0
         losses: List[float] = []
