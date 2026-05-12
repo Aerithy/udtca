@@ -12,7 +12,8 @@ from torch.utils.data import DataLoader, Dataset, Subset
 from datasets import DownloadConfig, load_dataset
 from transformers import AutoTokenizer
 
-from experiments.common import (
+# from experiments.common import (
+from .common import (
     CompressionConfig,
     append_summary_row,
     barrier,

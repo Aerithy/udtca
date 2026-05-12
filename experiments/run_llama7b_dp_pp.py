@@ -15,7 +15,8 @@ from tqdm import tqdm
 
 from psgd.models.llama.llama_nn import LlamaConfig, MyLlamaForCausalLM
 
-from experiments.common import (
+# from experiments.common import (
+from common import (
     CompressionConfig,
     append_summary_row,
     barrier,
