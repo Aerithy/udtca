@@ -5,6 +5,7 @@ from typing import List
 
 import torch
 import torch.distributed as dist
+import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.pipelining import PipelineStage, Schedule1F1B
@@ -13,7 +14,7 @@ from datasets import DownloadConfig, load_dataset
 from transformers import AutoTokenizer
 from tqdm import tqdm
 
-from psgd.models.llama.llama_nn import LlamaConfig, MyLlamaForCausalLM
+from psgd.models.llama.llama_nn import LlamaConfig, MyLlamaForCausalLM, RMSNorm
 
 # from experiments.common import (
 from common import (
@@ -183,6 +184,15 @@ def partition_llama_model(config: LlamaConfig, stage_idx: int, num_stages: int):
     return model
 
 
+def init_llama_weights(module: nn.Module) -> None:
+    if isinstance(module, nn.Linear):
+        nn.init.xavier_uniform_(module.weight)
+    elif isinstance(module, nn.Embedding):
+        nn.init.normal_(module.weight, mean=0.0, std=0.02)
+    elif isinstance(module, RMSNorm):
+        nn.init.ones_(module.weight)
+
+
 def loss_fn(output, target):
     shift_logits = output[..., :-1, :].contiguous()
     shift_labels = target[..., 1:].contiguous()
@@ -289,9 +299,7 @@ def main() -> None:
             pp_size,
         )
         stage_model.to_empty(device=device, recurse=True)
-        stage_model.apply(
-            lambda m: m.reset_parameters() if hasattr(m, "reset_parameters") else None
-        )
+        stage_model.apply(init_llama_weights)
 
         stage = PipelineStage(
             stage_model,
