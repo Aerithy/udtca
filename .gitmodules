@@ -1,0 +1,6 @@
+[submodule "bitscom"]
+	path = bitscom
+	url = https://github.com/Aerithy/bitscom.git
+[submodule "polar-sgd"]
+	path = polar-sgd
+	url = https://github.com/Aerithy/polar-sgd.git
