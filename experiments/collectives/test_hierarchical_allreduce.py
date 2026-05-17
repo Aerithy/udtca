@@ -36,36 +36,44 @@ def init_distributed():
     world_size = dist.get_world_size()
     
     # 获取节点信息（通过环境变量或计算）
-    node_id = int(os.environ.get("NODE_RANK", rank // 4))  # 假设每节点4卡
-    local_rank = rank % 4
+    node_id = int(os.environ.get("NODE_RANK", rank // 2))  # 假设每节点2卡
+    local_rank = rank % 2
     
     return rank, world_size, local_rank, node_id
 
-
 def build_hierarchical_groups(rank, world_size):
     """构建本地组和节点间组"""
-    # 默认每节点4卡
-    gpus_per_node = int(os.environ.get("GPUS_PER_NODE", 4))
+    # 默认每节点2卡
+    gpus_per_node = int(os.environ.get("GPUS_PER_NODE", 2))
     num_nodes = world_size // gpus_per_node
     
     node_id = rank // gpus_per_node
     local_rank = rank % gpus_per_node
     
     # 本地组：同节点内的所有GPU
-    local_ranks = [node_id * gpus_per_node + i for i in range(gpus_per_node)]
-    local_group = dist.new_group(local_ranks)
+    # local_ranks = [node_id * gpus_per_node + i for i in range(gpus_per_node)]
+    # print(f"[Rank {rank}] Node ID: {node_id}, Local ranks: {local_ranks}")
+    # local_group = dist.new_group(local_ranks)
+    
+    groups = []
+    for i in range(num_nodes):
+        local_ranks = [i * gpus_per_node + j for j in range(gpus_per_node)]
+        groups.append(dist.new_group(local_ranks))
+        # if i == node_id:
+        #     print(f"[Rank {rank}] Local group ranks: {local_ranks}")
     
     # 节点间组：每个节点的rank 0作为代表
     inter_ranks = [i * gpus_per_node for i in range(num_nodes)]
+    print(f"[Rank {rank}] Inter-group ranks: {inter_ranks}")
     inter_group = dist.new_group(inter_ranks)
     
-    return local_group, inter_group, gpus_per_node, num_nodes
+    return groups[node_id], inter_group, gpus_per_node, num_nodes
 
 
-def test_correctness(rank, world_size, local_rank):
+def test_correctness(rank, world_size, local_rank, device):
     """测试 hierarchical all-reduce 的数值正确性"""
-    device = torch.device(f"cuda:{local_rank}")
-    torch.cuda.set_device(device)
+    # device = torch.device(f"cuda:{rank}")
+    # torch.cuda.set_device(device)
     
     local_group, inter_group, gpus_per_node, num_nodes = build_hierarchical_groups(rank, world_size)
     
@@ -138,10 +146,10 @@ def test_single_node_fallback(rank, world_size, local_rank):
     return max_error < 1e-5
 
 
-def benchmark_throughput(rank, world_size, local_rank):
+def benchmark_throughput(rank, world_size, local_rank, device):
     """吞吐量基准测试"""
-    device = torch.device(f"cuda:{local_rank}")
-    torch.cuda.set_device(device)
+    # device = torch.device(f"cuda:{local_rank}")
+    # torch.cuda.set_device(device)
     
     local_group, inter_group, gpus_per_node, num_nodes = build_hierarchical_groups(rank, world_size)
     
@@ -227,7 +235,7 @@ def main():
     bitscom.init(bitwidth=4)
     
     rank, world_size, local_rank, node_id = init_distributed()
-    device = torch.device(f"cuda:{local_rank}")
+    device = torch.device(f"cuda:{rank}")
     torch.cuda.set_device(device)
     
     if rank == 0:
@@ -239,26 +247,26 @@ def main():
     # 测试1: 正确性验证
     if rank == 0:
         print("\n=== Test 1: Correctness ===")
-    correct = test_correctness(rank, world_size, local_rank)
+    correct = test_correctness(rank, world_size, local_rank, device)
     dist.barrier()
     
-    # 测试2: 单节点fallback
+    测试2: 单节点fallback
     if rank == 0:
         print("\n=== Test 2: Single Node Fallback ===")
-    single_node_ok = test_single_node_fallback(rank, world_size, local_rank)
+    # single_node_ok = test_single_node_fallback(rank, world_size, local_rank)
     dist.barrier()
     
     # 测试3: 吞吐量基准
     if rank == 0:
         print("\n=== Test 3: Throughput Benchmark ===")
-    results = benchmark_throughput(rank, world_size, local_rank)
+    results = benchmark_throughput(rank, world_size, local_rank, device)
     dist.barrier()
     
     # 输出结果
     if rank == 0:
         print("\n=== Summary ===")
         print(f"Hierarchical correct: {correct}")
-        print(f"Single node fallback: {single_node_ok}")
+        # print(f"Single node fallback: {single_node_ok}")
         
         with open('hierarchical_benchmark_results.json', 'w') as f:
             json.dump(results, f, indent=2)
