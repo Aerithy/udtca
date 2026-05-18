@@ -17,6 +17,7 @@ from common import CompressionConfig, sync_grads_bucketed
 
 
 class TokenizedDataset(Dataset):
+    """Tokenize text samples into fixed-length causal LM inputs."""
     def __init__(self, dataset, tokenizer, seq_length=2048, text_field="text"):
         self.dataset = dataset
         self.tokenizer = tokenizer
@@ -69,6 +70,7 @@ def get_dataloader(
     use_auth_token: bool,
     allow_download: bool,
 ):
+    """Build a dataloader with optional distributed sampling for DP+PP."""
     download_cfg = DownloadConfig(local_files_only=not allow_download)
     try:
         tokenizer = AutoTokenizer.from_pretrained(
@@ -137,6 +139,7 @@ def get_dataloader(
 
 
 def partition_llama_model(config: LlamaConfig, stage_idx: int, num_stages: int):
+    """Partition Llama layers across pipeline stages; add a dummy layer if empty."""
     with torch.device("meta"):
         model = MyLlamaForCausalLM(config)
         if dist.is_initialized() and dist.get_rank() == 0:
@@ -172,6 +175,7 @@ def partition_llama_model(config: LlamaConfig, stage_idx: int, num_stages: int):
 
 
 class BitscomPolarParallel(PolarParallel):
+    """PolarParallel variant that syncs DP gradients with bitscom compression."""
     def __init__(
         self,
         *,
@@ -243,9 +247,9 @@ def main():
         raise RuntimeError("CUDA is required")
 
     if args.method != "none" and args.train_mode == "polar":
-        raise ValueError("train-mode=polar does not support compressed DP sync")
+        raise ValueError("--train-mode=polar does not support compressed DP sync")
     if args.method != "none" and args.baseline_mode == "ddp":
-        raise ValueError("baseline-mode=ddp does not support compressed DP sync")
+        raise ValueError("--baseline-mode=ddp does not support compressed DP sync")
 
     if args.method == "bitscom":
         import bitscom
@@ -312,6 +316,9 @@ def main():
         use_auth_token=args.use_auth_token,
         allow_download=not args.no_download,
     )
+    pad_token_id = tokenizer.pad_token_id
+    if pad_token_id is None:
+        pad_token_id = 0
 
     eval_dataloader: Optional[DataLoader] = None
     if args.eval_split:
@@ -358,7 +365,7 @@ def main():
         return F.cross_entropy(
             shift_logits.view(-1, shift_logits.size(-1)),
             shift_labels.view(-1),
-            ignore_index=0,
+            ignore_index=pad_token_id,
         )
 
     stage_idx = pp_mesh.get_local_rank()
