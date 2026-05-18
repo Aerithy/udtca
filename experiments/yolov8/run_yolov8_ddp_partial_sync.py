@@ -456,6 +456,8 @@ def main() -> None:
     parser.add_argument("--run-name", type=str, default="partial")
     parser.add_argument("--no-eval", action="store_true")
     parser.add_argument("--eval-steps", type=int, default=10)
+    parser.add_argument("--debug-sync", action="store_true")
+    parser.add_argument("--debug-steps", type=int, default=2)
     parser.add_argument(
         "--task",
         type=str,
@@ -580,6 +582,7 @@ def main() -> None:
     pending_by_bucket: Dict[int, PendingSync] = {}
     last_batch_correct: Optional[torch.Tensor] = None
     last_batch_total: Optional[torch.Tensor] = None
+    launched_in_cycle = 0
 
     for micro_step in range(1, total_micro_steps + 1):
         cycle_step = (micro_step - 1) % args.sync_interval
@@ -587,6 +590,7 @@ def main() -> None:
 
         if cycle_step == 0:
             synced_in_cycle = [False for _ in buckets]
+            launched_in_cycle = 0
 
         batch = next(data_iter)
         if task == "detect":
@@ -643,8 +647,31 @@ def main() -> None:
             if pending is not None:
                 pending_by_bucket[bucket_idx] = pending
             synced_in_cycle[bucket_idx] = True
+            launched_in_cycle += 1
+            if args.debug_sync and cycle_id < args.debug_steps:
+                print(
+                    f"[debug_sync] rank={rank} cycle={cycle_id} step={cycle_step} "
+                    f"bucket={bucket_idx} pending={pending is not None}"
+                )
 
         if cycle_step == args.sync_interval - 1:
+            if args.debug_sync and cycle_id < args.debug_steps:
+                counts = torch.tensor(
+                    [launched_in_cycle, len(pending_by_bucket)],
+                    device=device,
+                    dtype=torch.int64,
+                )
+                min_counts = counts.clone()
+                max_counts = counts.clone()
+                dist.all_reduce(min_counts, op=dist.ReduceOp.MIN)
+                dist.all_reduce(max_counts, op=dist.ReduceOp.MAX)
+                if not torch.equal(min_counts, max_counts):
+                    if rank == 0:
+                        print(
+                            "[debug_sync] mismatch across ranks: "
+                            f"min={min_counts.tolist()} max={max_counts.tolist()}"
+                        )
+                    raise RuntimeError("debug_sync detected inconsistent async launches across ranks")
             for pending in list(pending_by_bucket.values()):
                 finish_bucket_sync(
                     pending=pending,
