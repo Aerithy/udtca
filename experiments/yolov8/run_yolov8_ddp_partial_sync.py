@@ -204,7 +204,7 @@ def main() -> None:
         bucket_numel = max(max_param_numel, math.ceil(total_numel / max(1, args.sync_interval)))
 
     buckets = build_buckets(params, bucket_numel)
-    if rank == 0 and buckets and len(buckets) % args.sync_interval != 0:
+    if rank == 0 and len(buckets) % args.sync_interval != 0:
         print(
             f"[warn] buckets ({len(buckets)}) not divisible by sync_interval "
             f"({args.sync_interval}); some steps will sync uneven bucket counts."
@@ -263,6 +263,7 @@ def main() -> None:
             residuals[param].add_(param.grad.detach())
             param.grad = None
 
+        # Sync buckets round-robin: bucket i syncs when cycle_step == i % sync_interval.
         for bucket_idx, bucket in enumerate(buckets):
             if bucket_idx % args.sync_interval != cycle_step:
                 continue
@@ -276,8 +277,12 @@ def main() -> None:
             synced_in_cycle[bucket_idx] = True
 
         if cycle_step == args.sync_interval - 1:
-            if rank == 0 and any(not was_synced for was_synced in synced_in_cycle):
-                print(f"[warn] cycle {cycle_id}: not all buckets synced before update")
+            missing = sum(1 for was_synced in synced_in_cycle if not was_synced)
+            if rank == 0 and missing:
+                print(
+                    f"[warn] cycle {cycle_id}: {missing} buckets not synced before update; "
+                    "consider adjusting bucket_numel or sync_interval."
+                )
 
             for param in params:
                 param.grad = synced[param]
