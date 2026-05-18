@@ -244,6 +244,8 @@ def main():
 
     if args.method != "none" and args.train_mode == "polar":
         raise ValueError("train-mode=polar does not support compressed DP sync")
+    if args.method != "none" and args.baseline_mode == "ddp":
+        raise ValueError("baseline-mode=ddp does not support compressed DP sync")
 
     if args.method == "bitscom":
         import bitscom
@@ -272,6 +274,11 @@ def main():
                 f"clamping to {args.batch_size}"
             )
         args.micro_batches = args.batch_size
+    if args.micro_batches < args.pp_size:
+        raise ValueError(
+            "micro-batches must be >= pp-size; "
+            "increase --batch-size or reduce --pp-size"
+        )
 
     dp_size = world_size // args.pp_size
     device_mesh = init_device_mesh("cuda", (dp_size, args.pp_size), mesh_dim_names=("dp", "pp"))
