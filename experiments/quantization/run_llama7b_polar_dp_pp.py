@@ -174,8 +174,8 @@ def partition_llama_model(config: LlamaConfig, stage_idx: int, num_stages: int):
     return model
 
 
-class BitscomPolarParallel(PolarParallel):
-    """PolarParallel variant that syncs DP gradients with bitscom compression."""
+class CompressedPolarParallel(PolarParallel):
+    """PolarParallel variant that syncs DP gradients with compression."""
     def __init__(
         self,
         *,
@@ -221,8 +221,18 @@ def main():
     parser.add_argument("--pp-size", "--pp_size", dest="pp_size", type=int, default=1)
     parser.add_argument("--micro-batches", "--micro_batches", dest="micro_batches", type=int, default=4)
     parser.add_argument("--comm-timing", type=int, default=-1)
-    parser.add_argument("--train-mode", choices=["baseline", "polar"], default="baseline")
-    parser.add_argument("--baseline-mode", choices=["manual", "ddp"], default="manual")
+    parser.add_argument(
+        "--train-mode",
+        choices=["baseline", "polar"],
+        default="baseline",
+        help="Use baseline DP sync or polar hooks (no compression support in polar mode).",
+    )
+    parser.add_argument(
+        "--baseline-mode",
+        choices=["manual", "ddp"],
+        default="manual",
+        help="Baseline DP sync strategy when train-mode=baseline.",
+    )
     parser.add_argument("--max-steps", type=int, default=200)
 
     parser.add_argument("--method", type=str, default="bitscom",
@@ -247,9 +257,15 @@ def main():
         raise RuntimeError("CUDA is required")
 
     if args.method != "none" and args.train_mode == "polar":
-        raise ValueError("--train-mode=polar does not support compressed DP sync")
+        raise ValueError(
+            "--train-mode=polar does not support compressed DP sync; "
+            "use --train-mode=baseline with compression methods"
+        )
     if args.method != "none" and args.baseline_mode == "ddp":
-        raise ValueError("--baseline-mode=ddp does not support compressed DP sync")
+        raise ValueError(
+            "--baseline-mode=ddp does not support compressed DP sync; "
+            "use --baseline-mode=manual with compression methods"
+        )
 
     if args.method == "bitscom":
         import bitscom
@@ -265,24 +281,24 @@ def main():
         )
 
     if args.micro_batches < args.pp_size:
+        if dist.get_rank() == 0:
+            print(
+                f"[warn] micro-batches < pp-size; bump to {args.pp_size} to satisfy GPipe"
+            )
         args.micro_batches = args.pp_size
-        if dist.get_rank() == 0:
-            print(
-                f"[warn] micro-batches < pp-size; bump to {args.micro_batches} to satisfy GPipe"
-            )
 
-    if args.micro_batches > args.batch_size:
-        if dist.get_rank() == 0:
-            print(
-                f"[warn] micro-batches {args.micro_batches} > batch-size {args.batch_size}; "
-                f"clamping to {args.batch_size}"
-            )
-        args.micro_batches = args.batch_size
-    if args.micro_batches < args.pp_size:
+    micro_batches = min(args.micro_batches, args.batch_size)
+    if micro_batches < args.pp_size:
         raise ValueError(
             "micro-batches must be >= pp-size; "
             "increase --batch-size or reduce --pp-size"
         )
+    if micro_batches != args.micro_batches and dist.get_rank() == 0:
+        print(
+            f"[warn] micro-batches {args.micro_batches} > batch-size {args.batch_size}; "
+            f"clamping to {micro_batches}"
+        )
+    args.micro_batches = micro_batches
 
     dp_size = world_size // args.pp_size
     device_mesh = init_device_mesh("cuda", (dp_size, args.pp_size), mesh_dim_names=("dp", "pp"))
@@ -394,7 +410,7 @@ def main():
         stochastic_rounding=args.stochastic_rounding,
     )
 
-    trainer = BitscomPolarParallel(
+    trainer = CompressedPolarParallel(
         args=args,
         device_mesh=device_mesh,
         micro_batches=args.micro_batches,
