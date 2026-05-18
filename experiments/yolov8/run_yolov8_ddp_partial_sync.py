@@ -204,7 +204,11 @@ def main() -> None:
         bucket_numel = max(max_param_numel, math.ceil(total_numel / max(1, args.sync_interval)))
 
     buckets = build_buckets(params, bucket_numel)
-    bucket_last_sync = [-1 for _ in buckets]
+    if rank == 0 and buckets and len(buckets) % args.sync_interval != 0:
+        print(
+            f"[warn] buckets ({len(buckets)}) not divisible by sync_interval "
+            f"({args.sync_interval}); some steps will sync uneven bucket counts."
+        )
 
     if rank == 0:
         total_params = total_numel / 1e6
@@ -232,9 +236,14 @@ def main() -> None:
     torch.cuda.synchronize(device)
     start_time = time.time()
 
+    synced_in_cycle = [False for _ in buckets]
+
     for micro_step in range(1, total_micro_steps + 1):
         cycle_step = (micro_step - 1) % args.sync_interval
         cycle_id = (micro_step - 1) // args.sync_interval
+
+        if cycle_step == 0:
+            synced_in_cycle = [False for _ in buckets]
 
         images, labels = next(data_iter)
         images = images.to(device, non_blocking=True)
@@ -243,6 +252,7 @@ def main() -> None:
         with ddp_model.no_sync():
             logits = ddp_model(images)
             loss = criterion(logits, labels)
+            raw_loss = loss.detach()
             if not args.no_scale_loss:
                 loss = loss / float(args.sync_interval)
             loss.backward()
@@ -263,10 +273,10 @@ def main() -> None:
                 world_size=world_size,
                 group=dist.group.WORLD,
             )
-            bucket_last_sync[bucket_idx] = cycle_id
+            synced_in_cycle[bucket_idx] = True
 
         if cycle_step == args.sync_interval - 1:
-            if rank == 0 and any(sync_id != cycle_id for sync_id in bucket_last_sync):
+            if rank == 0 and any(not synced for synced in synced_in_cycle):
                 print(f"[warn] cycle {cycle_id}: not all buckets synced before update")
 
             for param in params:
@@ -282,7 +292,7 @@ def main() -> None:
 
             update_step += 1
             if update_step % max(1, args.steps // 10) == 0 or update_step == 1:
-                loss_scalar = loss.detach().to(torch.float32)
+                loss_scalar = raw_loss.to(torch.float32)
                 dist.all_reduce(loss_scalar, op=dist.ReduceOp.SUM)
                 loss_scalar.div_(world_size)
                 if rank == 0:
