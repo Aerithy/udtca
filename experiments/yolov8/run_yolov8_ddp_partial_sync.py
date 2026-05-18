@@ -13,20 +13,23 @@ from torch.utils.data.distributed import DistributedSampler
 from ultralytics import YOLO
 
 
+MIN_SYNTHETIC_SAMPLES = 128
+
+
 class SyntheticClassificationDataset(Dataset):
     def __init__(self, *, samples: int, num_classes: int, img_size: int, seed: int) -> None:
         self.samples = int(samples)
         self.num_classes = int(num_classes)
         self.img_size = int(img_size)
-        self.generator = torch.Generator().manual_seed(int(seed))
+        self.base_seed = int(seed)
 
     def __len__(self) -> int:
         return self.samples
 
     def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor]:
-        _ = idx
-        image = torch.rand(3, self.img_size, self.img_size, generator=self.generator)
-        label = torch.randint(0, self.num_classes, (1,), generator=self.generator).item()
+        generator = torch.Generator().manual_seed(self.base_seed + int(idx))
+        image = torch.rand(3, self.img_size, self.img_size, generator=generator)
+        label = torch.randint(0, self.num_classes, (1,), generator=generator).item()
         return image, torch.tensor(label, dtype=torch.long)
 
 
@@ -68,7 +71,7 @@ def build_classification_loader(
         num_classes = len(dataset.classes)
     else:
         dataset = SyntheticClassificationDataset(
-            samples=max(steps * batch_size * world_size, 128),
+            samples=max(steps * batch_size * world_size, MIN_SYNTHETIC_SAMPLES),
             num_classes=num_classes,
             img_size=img_size,
             seed=seed + rank,
