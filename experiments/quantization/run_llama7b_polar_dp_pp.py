@@ -152,9 +152,16 @@ def partition_llama_model(config: LlamaConfig, stage_idx: int, num_stages: int):
     start_layer = stage_idx * layers_per_stage + min(stage_idx, remainder)
     end_layer = start_layer + layers_per_stage + (1 if stage_idx < remainder else 0)
 
-    for i in list(model.model.layers.keys()):
-        if not (start_layer <= int(i) < end_layer):
-            del model.model.layers[i]
+    keys_to_delete = []
+    for key in list(model.model.layers.keys()):
+        try:
+            layer_idx = int(key)
+        except ValueError:
+            continue
+        if not (start_layer <= layer_idx < end_layer):
+            keys_to_delete.append(key)
+    for key in keys_to_delete:
+        del model.model.layers[key]
 
     if len(model.model.layers) == 0:
         model.model.layers = torch.nn.ModuleDict(
@@ -171,8 +178,13 @@ def partition_llama_model(config: LlamaConfig, stage_idx: int, num_stages: int):
         model.model.final_norm = None
         model.lm_head = None
 
-    assigned_layers = [int(i) for i in model.model.layers.keys()]
-    print(f"[partition] stage {stage_idx}: layers {assigned_layers}")
+    assigned_layers = []
+    for key in model.model.layers.keys():
+        try:
+            assigned_layers.append(int(key))
+        except ValueError:
+            continue
+    print(f"[partition] stage {stage_idx}: layers {sorted(assigned_layers)}")
     return model
 
 
@@ -210,6 +222,12 @@ class CompressedPolarParallel(PolarParallel):
             lowbit_group=self.lowbit_group,
         )
 
+    def run(self, train_mode: str) -> None:
+        if train_mode == "polar":
+            self.train()
+        else:
+            self._train()
+
 
 def main():
     parser = argparse.ArgumentParser(description="Llama7B DP+PP (Polar + bitscom)")
@@ -218,8 +236,13 @@ def main():
     parser.add_argument("--seq-length", "--seq_length", dest="seq_length", type=int, default=1024)
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--dataset", type=str, default="wikitext")
-    parser.add_argument("--dataset-config", "--dataset_config", dest="dataset_config", type=str,
-                        default="wikitext-103-raw-v1")
+    parser.add_argument(
+        "--dataset-config",
+        "--dataset_config",
+        dest="dataset_config",
+        type=str,
+        default="wikitext-103-raw-v1",
+    )
     parser.add_argument("--tokenizer", type=str, default="hf-internal-testing/llama-tokenizer")
     parser.add_argument("--use-auth-token", action="store_true")
     parser.add_argument("--no-download", action="store_true")
@@ -240,8 +263,12 @@ def main():
     )
     parser.add_argument("--max-steps", type=int, default=200)
 
-    parser.add_argument("--method", type=str, default="bitscom",
-                        choices=["none", "quant8", "topk", "powersgd", "bitscom"])
+    parser.add_argument(
+        "--method",
+        type=str,
+        default="bitscom",
+        choices=["none", "quant8", "topk", "powersgd", "bitscom"],
+    )
     parser.add_argument("--bitwidth", type=int, default=4)
     parser.add_argument("--topk-ratio", type=float, default=0.01)
     parser.add_argument("--powersgd-rank", type=int, default=2)
@@ -261,16 +288,17 @@ def main():
     if not torch.cuda.is_available():
         raise RuntimeError("CUDA is required")
 
-    if args.method != "none" and args.train_mode == "polar":
-        raise ValueError(
-            "--train-mode=polar does not support compressed DP sync; "
-            "use --train-mode=baseline with compression methods"
-        )
-    if args.method != "none" and args.baseline_mode == "ddp":
-        raise ValueError(
-            "--baseline-mode=ddp does not support compressed DP sync; "
-            "use --baseline-mode=manual with compression methods"
-        )
+    if args.method != "none":
+        if args.train_mode == "polar":
+            raise ValueError(
+                "--train-mode=polar does not support compressed DP sync; "
+                "use --train-mode=baseline with compression methods"
+            )
+        if args.baseline_mode == "ddp":
+            raise ValueError(
+                "--baseline-mode=ddp does not support compressed DP sync; "
+                "use --baseline-mode=manual with compression methods"
+            )
 
     bitscom_module = None
     if args.method == "bitscom":
@@ -433,10 +461,7 @@ def main():
         lowbit_group=lowbit_group,
     )
 
-    if args.train_mode == "polar":
-        trainer.train()
-    else:
-        trainer._train()
+    trainer.run(args.train_mode)
 
     if dist.is_initialized():
         dist.destroy_process_group()
