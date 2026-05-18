@@ -1,3 +1,6 @@
+export NCCL_DEBUG=INFO
+export NCCL_IB_DISABLE=1
+export NCCL_SOCKET_IFNAME=ens1f0
 torchrun \
   --nproc_per_node=4 \
   --nnodes=2 \
@@ -10,4 +13,5 @@ torchrun \
   --data experiments/yolov8/holes_v3.yaml \
   --imgsz 640 \
   --sync-interval 4 \
-  --steps 100
+  --steps 100 \
+  --run-name partial 
