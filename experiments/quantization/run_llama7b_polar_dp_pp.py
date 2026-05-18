@@ -253,7 +253,7 @@ def main():
         "--train-mode",
         choices=["baseline", "polar"],
         default="baseline",
-        help="Use baseline DP sync or polar hooks; compression is only available with baseline.",
+        help="Use baseline DP sync or polar hooks; compression is currently baseline-only.",
     )
     parser.add_argument(
         "--baseline-mode",
@@ -314,25 +314,29 @@ def main():
             f"world_size {world_size} must be divisible by pp_size {args.pp_size}"
         )
 
-    if args.micro_batches < args.pp_size:
-        if dist.get_rank() == 0:
-            print(
-                f"[warn] micro-batches < pp-size; bump to {args.pp_size} to satisfy GPipe"
+    def _normalize_micro_batches() -> int:
+        micro_batches = args.micro_batches
+        if micro_batches < args.pp_size:
+            if dist.get_rank() == 0:
+                print(
+                    f"[warn] micro-batches < pp-size; bump to {args.pp_size} to satisfy GPipe"
+                )
+            micro_batches = args.pp_size
+        if micro_batches > args.batch_size:
+            if dist.get_rank() == 0:
+                print(
+                    f"[warn] micro-batches {micro_batches} > batch-size {args.batch_size}; "
+                    f"clamping to {args.batch_size}"
+                )
+            micro_batches = args.batch_size
+        if micro_batches < args.pp_size:
+            raise ValueError(
+                "micro-batches must be >= pp-size; "
+                "increase --batch-size or reduce --pp-size"
             )
-        args.micro_batches = args.pp_size
+        return micro_batches
 
-    micro_batches = min(args.micro_batches, args.batch_size)
-    if micro_batches < args.pp_size:
-        raise ValueError(
-            "micro-batches must be >= pp-size; "
-            "increase --batch-size or reduce --pp-size"
-        )
-    if micro_batches != args.micro_batches and dist.get_rank() == 0:
-        print(
-            f"[warn] micro-batches {args.micro_batches} > batch-size {args.batch_size}; "
-            f"clamping to {micro_batches}"
-        )
-    args.micro_batches = micro_batches
+    args.micro_batches = _normalize_micro_batches()
 
     dp_size = world_size // args.pp_size
     device_mesh = init_device_mesh("cuda", (dp_size, args.pp_size), mesh_dim_names=("dp", "pp"))
@@ -386,7 +390,7 @@ def main():
         from torch.utils.data import random_split
 
         n = len(dataloader.dataset)
-        n_val = max(1, int(n * float(args.train_val_ratio)))
+        n_val = max(1, int(n * args.train_val_ratio))
         n_train = n - n_val
         train_ds, val_ds = random_split(dataloader.dataset, [n_train, n_val])
 
