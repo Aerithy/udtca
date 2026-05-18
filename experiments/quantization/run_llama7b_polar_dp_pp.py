@@ -157,7 +157,9 @@ def partition_llama_model(config: LlamaConfig, stage_idx: int, num_stages: int):
             del model.model.layers[i]
 
     if len(model.model.layers) == 0:
-        model.model.layers = torch.nn.ModuleDict({"dummy": torch.nn.Identity()})
+        model.model.layers = torch.nn.ModuleDict(
+            {"empty_stage_placeholder": torch.nn.Identity()}
+        )
 
     if stage_idx == 0:
         model.lm_head = None
@@ -175,7 +177,10 @@ def partition_llama_model(config: LlamaConfig, stage_idx: int, num_stages: int):
 
 
 class CompressedPolarParallel(PolarParallel):
-    """PolarParallel variant that syncs DP gradients with compression."""
+    """PolarParallel variant that syncs DP gradients with compression.
+
+    Relies on PolarParallel's args namespace for logging configuration.
+    """
     def __init__(
         self,
         *,
@@ -225,7 +230,7 @@ def main():
         "--train-mode",
         choices=["baseline", "polar"],
         default="baseline",
-        help="Use baseline DP sync or polar hooks (no compression support in polar mode).",
+        help="Use baseline DP sync or polar hooks; compression is only available with baseline.",
     )
     parser.add_argument(
         "--baseline-mode",
@@ -267,10 +272,11 @@ def main():
             "use --baseline-mode=manual with compression methods"
         )
 
+    bitscom_module = None
     if args.method == "bitscom":
-        import bitscom
+        import bitscom as bitscom_module
 
-        bitscom.init(bitwidth=args.bitwidth)
+        bitscom_module.init(bitwidth=args.bitwidth)
 
     dist.init_process_group(backend="nccl", init_method="env://")
     world_size = dist.get_world_size()
@@ -311,9 +317,7 @@ def main():
 
     lowbit_group = None
     if args.method == "bitscom":
-        import bitscom
-
-        lowbit_group = bitscom.LowBitGroup(
+        lowbit_group = bitscom_module.LowBitGroup(
             bitwidth=args.bitwidth,
             process_group=dp_mesh.get_group(),
             simulate_quantization=args.simulate_quantization,

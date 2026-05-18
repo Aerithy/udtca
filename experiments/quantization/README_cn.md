@@ -58,20 +58,9 @@ torchrun --nproc_per_node=4 experiments/run_llama7b_dp_pp.py \
   --methods none bitscom quant8
 ```
 
-### PolarParallel + bitscom（基线 DP 同步）
-该脚本基于 polar-sgd 的 PolarParallel，并在 DP 梯度同步时使用 bitscom。
-
-示例：
-```
-torchrun --nproc_per_node=4 experiments/quantization/run_llama7b_polar_dp_pp.py \
-  --pp-size 2 \
-  --method bitscom \
-  --train-mode baseline
-```
-
 控制每个 epoch 的 step 数量：
 ```
-torchrun --nproc_per_node=4 experiments/run_llama7b_dp_pp.py \
+torchrun --nproc_per_node=4 experiments/quantization/run_llama7b_dp_pp.py \
   --pp-size 2 \
   --steps-per-epoch 100
 ```
@@ -83,6 +72,17 @@ torchrun --nproc_per_node=4 experiments/run_llama7b_dp_pp.py \
 - loss 曲线按方法分别保存；吞吐率为 tokens/sec。
 - ResNet50 吞吐率为 samples/sec；BERT/GPT-2 为 tokens/sec。
 - bitscom 相关结果会单独存放在 experiments/results/bitscom。
+
+### PolarParallel + bitscom（基线 DP 同步）
+该脚本基于 polar-sgd 的 PolarParallel，并在 DP 梯度同步时使用 bitscom。
+
+示例：
+```
+torchrun --nproc_per_node=4 experiments/quantization/run_llama7b_polar_dp_pp.py \
+  --pp-size 2 \
+  --method bitscom \
+  --train-mode baseline
+```
 
 ## 运行顺序
 推荐的实验顺序：
