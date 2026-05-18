@@ -57,6 +57,17 @@ torchrun --nproc_per_node=4 experiments/run_llama7b_dp_pp.py \
   --methods none bitscom quant8
 ```
 
+### PolarParallel + bitscom (baseline DP sync)
+This variant uses PolarParallel from polar-sgd and plugs in bitscom for DP gradient sync.
+
+Example:
+```
+torchrun --nproc_per_node=4 experiments/quantization/run_llama7b_polar_dp_pp.py \
+  --pp-size 2 \
+  --method bitscom \
+  --train-mode baseline
+```
+
 Control steps per epoch:
 ```
 torchrun --nproc_per_node=4 experiments/run_llama7b_dp_pp.py \
