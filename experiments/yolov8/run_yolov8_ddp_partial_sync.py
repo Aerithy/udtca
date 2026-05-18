@@ -276,7 +276,7 @@ def main() -> None:
             synced_in_cycle[bucket_idx] = True
 
         if cycle_step == args.sync_interval - 1:
-            if rank == 0 and any(not synced for synced in synced_in_cycle):
+            if rank == 0 and any(not was_synced for was_synced in synced_in_cycle):
                 print(f"[warn] cycle {cycle_id}: not all buckets synced before update")
 
             for param in params:
