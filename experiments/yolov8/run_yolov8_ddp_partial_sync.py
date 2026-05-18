@@ -107,7 +107,9 @@ class YoloDetectionDataset(Dataset):
 
 def init_distributed() -> Tuple[int, int, int]:
     if not dist.is_initialized():
+        print("[dist] init_process_group start", flush=True)
         dist.init_process_group(backend="nccl", init_method="env://")
+        print("[dist] init_process_group done", flush=True)
     rank = dist.get_rank()
     world_size = dist.get_world_size()
     local_rank = int(os.environ.get("LOCAL_RANK", rank))
@@ -470,7 +472,9 @@ def main() -> None:
     if not torch.cuda.is_available():
         raise RuntimeError("CUDA is required for DDP training.")
 
+    print("[main] before init_distributed", flush=True)
     rank, world_size, local_rank = init_distributed()
+    print(f"[main] after init_distributed rank={rank} world_size={world_size}", flush=True)
     device = torch.device(f"cuda:{local_rank}")
 
     run_dir = init_run_dir(args.log_dir, args.run_name, rank)
@@ -591,6 +595,11 @@ def main() -> None:
         if cycle_step == 0:
             synced_in_cycle = [False for _ in buckets]
             launched_in_cycle = 0
+            if args.debug_sync and cycle_id < args.debug_steps:
+                print(
+                    f"[debug_sync] rank={rank} cycle={cycle_id} step={cycle_step} begin",
+                    flush=True,
+                )
 
         batch = next(data_iter)
         if task == "detect":
@@ -651,7 +660,8 @@ def main() -> None:
             if args.debug_sync and cycle_id < args.debug_steps:
                 print(
                     f"[debug_sync] rank={rank} cycle={cycle_id} step={cycle_step} "
-                    f"bucket={bucket_idx} pending={pending is not None}"
+                    f"bucket={bucket_idx} pending={pending is not None}",
+                    flush=True,
                 )
 
         if cycle_step == args.sync_interval - 1:
@@ -669,7 +679,8 @@ def main() -> None:
                     if rank == 0:
                         print(
                             "[debug_sync] mismatch across ranks: "
-                            f"min={min_counts.tolist()} max={max_counts.tolist()}"
+                            f"min={min_counts.tolist()} max={max_counts.tolist()}",
+                            flush=True,
                         )
                     raise RuntimeError("debug_sync detected inconsistent async launches across ranks")
             for pending in list(pending_by_bucket.values()):

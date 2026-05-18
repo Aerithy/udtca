@@ -14,4 +14,5 @@ torchrun \
   --imgsz 640 \
   --sync-interval 4 \
   --steps 100 \
-  --run-name partial 
+  --run-name partial  \
+  --debug-sync
