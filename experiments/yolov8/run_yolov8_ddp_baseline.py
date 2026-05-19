@@ -402,6 +402,11 @@ def main() -> None:
     parser.add_argument("--no-eval", action="store_true")
     parser.add_argument("--eval-steps", type=int, default=10)
     parser.add_argument(
+        "--eval-ddp",
+        action="store_true",
+        help="Run detection eval on all ranks (required for multi-rank eval).",
+    )
+    parser.add_argument(
         "--task",
         type=str,
         default="auto",
@@ -556,11 +561,34 @@ def main() -> None:
                     f"loss={loss_scalar.item():.4f} elapsed={elapsed:.1f}s"
                 )
 
+    if task == "detect" and not args.no_eval and world_size > 1 and args.eval_ddp:
+        try:
+            yolo.model = ddp_model.module
+            yolo.model.eval()
+            eval_data = args.data
+            if args.data.endswith((".yaml", ".yml")):
+                eval_data = resolve_eval_yaml(args.data, run_dir)
+            results = yolo.val(
+                data=eval_data,
+                imgsz=args.imgsz,
+                batch=args.batch_size,
+                device=local_rank,
+                verbose=False,
+                plots=False,
+            )
+            if rank == 0:
+                final_accuracy = extract_detection_metric(results)
+        except Exception as exc:
+            if rank == 0:
+                print(f"[warn] detection eval failed: {exc}")
+    dist.barrier()
+    dist.destroy_process_group()
+
     if rank == 0:
         total_time = time.time() - start_time
         print(f"[done] updates={update_step} total_time={total_time:.1f}s")
 
-        if task == "detect" and not args.no_eval:
+        if task == "detect" and not args.no_eval and not args.eval_ddp:
             try:
                 yolo.model = ddp_model.module
                 yolo.model.eval()
@@ -597,9 +625,6 @@ def main() -> None:
             summary_path = run_dir / "summary.json"
             with summary_path.open("w", encoding="utf-8") as handle:
                 json.dump(summary, handle, indent=2)
-
-    dist.barrier()
-    dist.destroy_process_group()
 
 
 if __name__ == "__main__":

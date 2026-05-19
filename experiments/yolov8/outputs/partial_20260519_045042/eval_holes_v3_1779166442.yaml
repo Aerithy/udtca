@@ -1,0 +1,6 @@
+names:
+  0: hole
+path: /root/ytli/udtca/experiments/yolov8/holes_v3
+test: null
+train: images/train
+val: images/val
