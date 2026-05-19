@@ -16,5 +16,5 @@ torchrun \
   --data experiments/yolov8/holes_v3.yaml \
   --imgsz 640 \
   --sync-interval 4 \
-  --steps 100 \
+  --micro-steps 100 \
   --run-name partial
