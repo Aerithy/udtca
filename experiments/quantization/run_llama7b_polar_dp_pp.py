@@ -234,7 +234,8 @@ def main():
     parser.add_argument("--epochs", type=int, default=1)
     parser.add_argument("--batch-size", "--batch_size", dest="batch_size", type=int, default=1)
     parser.add_argument("--seq-length", "--seq_length", dest="seq_length", type=int, default=1024)
-    parser.add_argument("--lr", type=float, default=1e-4)
+    parser.add_argument("--lr", type=float, default=1e-5)
+    parser.add_argument("--grad-clip-norm", "--grad_clip_norm", dest="grad_clip_norm", type=float, default=1.0)
     parser.add_argument("--dataset", type=str, default="wikitext")
     parser.add_argument(
         "--dataset-config",
