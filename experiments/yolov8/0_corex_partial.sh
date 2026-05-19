@@ -18,5 +18,7 @@ torchrun \
   --imgsz 640 \
   --sync-interval 4 \
   --micro-steps 100 \
+  --lr 0.001 \
+  --grad-clip 1.0 \
   --run-name partial  \
-  --debug-sync
+  # --debug-sync
