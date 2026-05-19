@@ -22,4 +22,5 @@ torchrun \
   --weight-decay 0.01 \
   --grad-clip 5.0 \
   --grad-clip-steps 5 \
-  --run-name partial
+  --run-name partial \
+  --eval-ddp
