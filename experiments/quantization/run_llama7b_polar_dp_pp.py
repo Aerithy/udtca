@@ -15,6 +15,8 @@ from psgd.parallelism.polar.wrapper import PolarParallel
 
 from common import CompressionConfig, sync_grads_bucketed
 
+RUN_LLAMA_POLAR_FIX_VERSION = "label_mask_debug_wrapper_guard_v1"
+
 
 class TokenizedDataset(Dataset):
     """Tokenize text samples into fixed-length causal LM inputs."""
@@ -286,6 +288,12 @@ def main():
     parser.add_argument("--train-val-ratio", type=float, default=0.0)
     parser.add_argument("--eval-interval", type=int, default=50)
     parser.add_argument("--eval-max-batches", type=int, default=20)
+    parser.add_argument(
+        "--debug-nan-steps",
+        type=int,
+        default=0,
+        help="Print finite-check diagnostics for the first N training steps.",
+    )
 
     args = parser.parse_args()
     args.using_polar = args.train_mode == "polar"
@@ -311,8 +319,19 @@ def main():
 
         bitscom_module.init(bitwidth=args.bitwidth)
 
+    if not hasattr(PolarParallel, "_broadcast_stage_parameters_from_dp_root"):
+        raise RuntimeError(
+            "PolarParallel is missing the Llama initialization/broadcast fix. "
+            "Please update polar-sgd/src/psgd/parallelism/polar/wrapper.py on this node."
+        )
+
     dist.init_process_group(backend="nccl", init_method="env://")
     world_size = dist.get_world_size()
+    print(
+        f"[run_llama7b_polar_dp_pp] version={RUN_LLAMA_POLAR_FIX_VERSION} "
+        f"rank={dist.get_rank()} file={__file__}",
+        flush=True,
+    )
 
     if world_size % args.pp_size != 0:
         raise RuntimeError(
@@ -413,6 +432,19 @@ def main():
         )
 
     def loss_fn(output, target):
+        debug_steps = int(getattr(args, "debug_nan_steps", 0) or 0)
+        if debug_steps > 0:
+            rank = dist.get_rank() if dist.is_initialized() else -1
+            finite_output = bool(torch.isfinite(output).all().item())
+            valid_targets = int(target.ne(-100).sum().item())
+            print(
+                f"[debug_nan][rank {rank}] loss_fn "
+                f"output_finite={finite_output} "
+                f"output_min={output.nan_to_num().min().item():.6g} "
+                f"output_max={output.nan_to_num().max().item():.6g} "
+                f"valid_targets={valid_targets}",
+                flush=True,
+            )
         return F.cross_entropy(
             output.reshape(-1, output.size(-1)),
             target.reshape(-1),
