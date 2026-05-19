@@ -451,6 +451,12 @@ def main() -> None:
     parser.add_argument("--num-classes", type=int, default=1000)
     parser.add_argument("--lr", type=float, default=0.01)
     parser.add_argument("--weight-decay", type=float, default=1e-4)
+    parser.add_argument(
+        "--optimizer",
+        type=str,
+        default="sgd",
+        choices=("sgd", "adam", "adamw"),
+    )
     parser.add_argument("--grad-clip", type=float, default=0.0)
     parser.add_argument(
         "--grad-clip-steps",
@@ -582,12 +588,25 @@ def main() -> None:
     residuals = {p: torch.zeros_like(p, device=device) for p in params}
     synced = {p: torch.zeros_like(p, device=device) for p in params}
 
-    optimizer = torch.optim.SGD(
-        params,
-        lr=args.lr,
-        momentum=0.9,
-        weight_decay=args.weight_decay,
-    )
+    if args.optimizer == "adam":
+        optimizer = torch.optim.Adam(
+            params,
+            lr=args.lr,
+            weight_decay=args.weight_decay,
+        )
+    elif args.optimizer == "adamw":
+        optimizer = torch.optim.AdamW(
+            params,
+            lr=args.lr,
+            weight_decay=args.weight_decay,
+        )
+    else:
+        optimizer = torch.optim.SGD(
+            params,
+            lr=args.lr,
+            momentum=0.9,
+            weight_decay=args.weight_decay,
+        )
     criterion = torch.nn.CrossEntropyLoss() if task == "classify" else None
 
     data_iter = infinite_loader(loader)

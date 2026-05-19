@@ -17,7 +17,9 @@ torchrun \
   --imgsz 640 \
   --sync-interval 4 \
   --micro-steps 100 \
-  --lr 0.01 \
+  --optimizer adamw \
+  --lr 0.001 \
+  --weight-decay 0.01 \
   --grad-clip 5.0 \
   --grad-clip-steps 5 \
   --run-name partial

@@ -16,6 +16,8 @@ torchrun \
   --data experiments/yolov8/holes_v3.yaml \
   --imgsz 640 \
   --steps 100 \
-  --lr 0.01 \
+  --optimizer adamw \
+  --lr 0.001 \
+  --weight-decay 0.01 \
   --grad-clip 1.0 \
   --run-name baseline
