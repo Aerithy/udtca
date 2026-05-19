@@ -20,6 +20,7 @@
 import os
 import time
 import json
+from datetime import timedelta
 import torch
 import torch.distributed as dist
 import sys
@@ -27,28 +28,100 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..', 'bitscom', '
 import bitscom
 
 
+def _env_int(name, default=None):
+    value = os.environ.get(name)
+    if value is None:
+        if default is None:
+            raise RuntimeError(f"Missing required distributed env var: {name}")
+        return default
+    return int(value)
+
+
+def _dist_env_snapshot():
+    keys = (
+        "RANK",
+        "WORLD_SIZE",
+        "LOCAL_RANK",
+        "LOCAL_WORLD_SIZE",
+        "NODE_RANK",
+        "GROUP_RANK",
+        "GPUS_PER_NODE",
+        "MASTER_ADDR",
+        "MASTER_PORT",
+        "CUDA_VISIBLE_DEVICES",
+        "NCCL_SOCKET_IFNAME",
+    )
+    return {key: os.environ.get(key) for key in keys}
+
+
 def init_distributed():
     """初始化分布式环境"""
+    local_rank = _env_int("LOCAL_RANK", 0)
+    torch.cuda.set_device(local_rank)
+
     if not dist.is_initialized():
-        dist.init_process_group(backend="nccl")
+        print(
+            f"[dist] init_process_group start env={_dist_env_snapshot()}",
+            flush=True,
+        )
+        dist.init_process_group(
+            backend="nccl",
+            init_method="env://",
+            timeout=timedelta(minutes=10),
+        )
+        print("[dist] init_process_group done", flush=True)
     
     rank = dist.get_rank()
     world_size = dist.get_world_size()
-    
-    # 获取节点信息（通过环境变量或计算）
-    node_id = int(os.environ.get("NODE_RANK", rank // 4))  # 假设每节点2卡
-    local_rank = rank % 4
-    
-    return rank, world_size, local_rank, node_id
 
-def build_hierarchical_groups(rank, world_size):
+    local_world_size = _env_int("LOCAL_WORLD_SIZE", torch.cuda.device_count())
+    gpus_per_node = _env_int("GPUS_PER_NODE", local_world_size)
+    node_id = _env_int("NODE_RANK", _env_int("GROUP_RANK", rank // gpus_per_node))
+
+    if os.environ.get("GPUS_PER_NODE") and gpus_per_node != local_world_size:
+        raise RuntimeError(
+            "GPUS_PER_NODE must match LOCAL_WORLD_SIZE for this test. "
+            f"env={_dist_env_snapshot()}"
+        )
+    if world_size % gpus_per_node != 0:
+        raise RuntimeError(
+            f"WORLD_SIZE ({world_size}) must be divisible by GPUS_PER_NODE "
+            f"({gpus_per_node}). env={_dist_env_snapshot()}"
+        )
+    if os.environ.get("GPUS_PER_NODE") is None and world_size != 8:
+        raise RuntimeError(
+            "Expected WORLD_SIZE=8 for the default 2-node/4-GPU run. "
+            "Set GPUS_PER_NODE explicitly to run a different topology. "
+            f"env={_dist_env_snapshot()}"
+        )
+    if os.environ.get("GPUS_PER_NODE") is None and local_world_size != 4:
+        raise RuntimeError(
+            "Expected LOCAL_WORLD_SIZE=4 for the default 2-node/4-GPU run. "
+            "Set GPUS_PER_NODE explicitly to run a different topology. "
+            f"env={_dist_env_snapshot()}"
+        )
+
+    return rank, world_size, local_rank, node_id, local_world_size, gpus_per_node
+
+
+def log_barrier(label, rank, node_id, local_rank):
+    current_device = torch.cuda.current_device()
+    prefix = (
+        f"[Rank {rank} Node {node_id} Local {local_rank} "
+        f"CUDA {current_device}]"
+    )
+    print(f"{prefix} before {label}", flush=True)
+    dist.barrier(device_ids=[local_rank])
+    print(f"{prefix} after {label}", flush=True)
+
+
+def build_hierarchical_groups(rank, world_size, gpus_per_node=None):
     """构建本地组和节点间组"""
-    # 默认每节点2卡
-    gpus_per_node = int(os.environ.get("GPUS_PER_NODE", 4))
+    if gpus_per_node is None:
+        gpus_per_node = _env_int("GPUS_PER_NODE", _env_int("LOCAL_WORLD_SIZE", 4))
     num_nodes = world_size // gpus_per_node
     
     node_id = rank // gpus_per_node
-    local_rank = rank % gpus_per_node
     
     # 本地组：同节点内的所有GPU
     # local_ranks = [node_id * gpus_per_node + i for i in range(gpus_per_node)]
@@ -64,18 +137,22 @@ def build_hierarchical_groups(rank, world_size):
     
     # 节点间组：每个节点的rank 0作为代表
     inter_ranks = [i * gpus_per_node for i in range(num_nodes)]
-    print(f"[Rank {rank}] Inter-group ranks: {inter_ranks}")
+    print(f"[Rank {rank}] Inter-group ranks: {inter_ranks}", flush=True)
     inter_group = dist.new_group(inter_ranks)
     
     return groups[node_id], inter_group, gpus_per_node, num_nodes
 
 
-def test_correctness(rank, world_size, local_rank, device):
+def test_correctness(rank, world_size, local_rank, device, gpus_per_node):
     """测试 hierarchical all-reduce 的数值正确性"""
     # device = torch.device(f"cuda:{rank}")
     # torch.cuda.set_device(device)
     
-    local_group, inter_group, gpus_per_node, num_nodes = build_hierarchical_groups(rank, world_size)
+    local_group, inter_group, gpus_per_node, num_nodes = build_hierarchical_groups(
+        rank,
+        world_size,
+        gpus_per_node,
+    )
     
     # 创建测试张量
     tensor = torch.ones(1024, device=device) * (rank + 1)
@@ -146,12 +223,16 @@ def test_single_node_fallback(rank, world_size, local_rank):
     return max_error < 1e-5
 
 
-def benchmark_throughput(rank, world_size, local_rank, device):
+def benchmark_throughput(rank, world_size, local_rank, device, gpus_per_node):
     """吞吐量基准测试"""
     # device = torch.device(f"cuda:{local_rank}")
     # torch.cuda.set_device(device)
     
-    local_group, inter_group, gpus_per_node, num_nodes = build_hierarchical_groups(rank, world_size)
+    local_group, inter_group, gpus_per_node, num_nodes = build_hierarchical_groups(
+        rank,
+        world_size,
+        gpus_per_node,
+    )
     
     # 测试不同张量大小
     tensor_sizes = [
@@ -234,33 +315,36 @@ def benchmark_throughput(rank, world_size, local_rank, device):
 def main():
     bitscom.init(bitwidth=4)
     
-    rank, world_size, local_rank, node_id = init_distributed()
+    rank, world_size, local_rank, node_id, local_world_size, gpus_per_node = init_distributed()
     device = torch.device(f"cuda:{local_rank}")
-    torch.cuda.set_device(device)
     
     if rank == 0:
-        print(f"[INFO] World size: {world_size}")
-        print(f"[INFO] Running on node {node_id}, local rank {local_rank}")
+        print(f"[INFO] World size: {world_size}", flush=True)
+    print(
+        f"[INFO] rank={rank} node={node_id} local_rank={local_rank} "
+        f"local_world_size={local_world_size} gpus_per_node={gpus_per_node}",
+        flush=True,
+    )
     
-    dist.barrier()
+    log_barrier("first barrier", rank, node_id, local_rank)
     
     # 测试1: 正确性验证
     if rank == 0:
-        print("\n=== Test 1: Correctness ===")
-    correct = test_correctness(rank, world_size, local_rank, device)
-    dist.barrier()
+        print("\n=== Test 1: Correctness ===", flush=True)
+    correct = test_correctness(rank, world_size, local_rank, device, gpus_per_node)
+    log_barrier("correctness barrier", rank, node_id, local_rank)
     
     # 测试2: 单节点fallback
     if rank == 0:
-        print("\n=== Test 2: Single Node Fallback ===")
+        print("\n=== Test 2: Single Node Fallback ===", flush=True)
     # single_node_ok = test_single_node_fallback(rank, world_size, local_rank)
-    dist.barrier()
+    log_barrier("single-node fallback barrier", rank, node_id, local_rank)
     
     # 测试3: 吞吐量基准
     if rank == 0:
-        print("\n=== Test 3: Throughput Benchmark ===")
-    results = benchmark_throughput(rank, world_size, local_rank, device)
-    dist.barrier()
+        print("\n=== Test 3: Throughput Benchmark ===", flush=True)
+    results = benchmark_throughput(rank, world_size, local_rank, device, gpus_per_node)
+    log_barrier("benchmark barrier", rank, node_id, local_rank)
     
     # 输出结果
     if rank == 0:
