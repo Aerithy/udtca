@@ -48,8 +48,9 @@ class TokenizedDataset(Dataset):
             )
 
         input_ids = torch.tensor(tokens[:-1], dtype=torch.long)
-        labels = torch.tensor(tokens[1:], dtype=torch.long)
         attention_mask = (input_ids != self.tokenizer.pad_token_id).long()
+        labels = torch.tensor(tokens[1:], dtype=torch.long)
+        labels = labels.masked_fill(attention_mask == 0, -100)
         return {
             "input_ids": input_ids,
             "labels": labels,
@@ -418,7 +419,7 @@ def main():
         return F.cross_entropy(
             shift_logits.view(-1, shift_logits.size(-1)),
             shift_labels.view(-1),
-            ignore_index=pad_token_id,
+            ignore_index=-100,
         )
 
     stage_idx = pp_mesh.get_local_rank()

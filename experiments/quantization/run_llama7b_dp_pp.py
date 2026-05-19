@@ -50,6 +50,7 @@ class TokenizedDataset(Dataset):
         if len(tokens) < 2:
             tokens = [self.tokenizer.bos_token_id, self.tokenizer.eos_token_id]
 
+        valid_token_count = min(len(tokens), self.seq_length + 1)
         if len(tokens) > self.seq_length + 1:
             tokens = tokens[: self.seq_length + 1]
         else:
@@ -59,7 +60,10 @@ class TokenizedDataset(Dataset):
 
         input_ids = torch.tensor(tokens[:-1], dtype=torch.long)
         labels = torch.tensor(tokens[1:], dtype=torch.long)
-        attention_mask = (input_ids != self.tokenizer.pad_token_id).long()
+        input_positions = torch.arange(self.seq_length, dtype=torch.long)
+        attention_mask = (input_positions < min(valid_token_count, self.seq_length)).long()
+        label_mask = input_positions < max(0, valid_token_count - 1)
+        labels = labels.masked_fill(~label_mask, -100)
         return {
             "input_ids": input_ids,
             "labels": labels,
@@ -268,17 +272,11 @@ def main() -> None:
         allow_download=not args.no_download,
     )
 
-    pad_token_id = tokenizer.pad_token_id
-    if pad_token_id is None:
-        pad_token_id = 0
-
     def loss_fn(output, target):
-        shift_logits = output[..., :-1, :].contiguous()
-        shift_labels = target[..., 1:].contiguous()
         return F.cross_entropy(
-            shift_logits.view(-1, shift_logits.size(-1)),
-            shift_labels.view(-1),
-            ignore_index=pad_token_id,
+            output.reshape(-1, output.size(-1)),
+            target.reshape(-1),
+            ignore_index=-100,
         )
 
     dp_group = dp_mesh.get_group()
