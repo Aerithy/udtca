@@ -445,6 +445,7 @@ def main() -> None:
     parser.add_argument("--imgsz", type=int, default=224)
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--steps", type=int, default=100)
+    parser.add_argument("--micro-steps", type=int, default=0)
     parser.add_argument("--sync-interval", type=int, default=4)
     parser.add_argument("--bucket-numel", type=int, default=0)
     parser.add_argument("--num-classes", type=int, default=1000)
@@ -476,6 +477,14 @@ def main() -> None:
     rank, world_size, local_rank = init_distributed()
     print(f"[main] after init_distributed rank={rank} world_size={world_size}", flush=True)
     device = torch.device(f"cuda:{local_rank}")
+
+    total_micro_steps = args.steps * args.sync_interval
+    target_updates = args.steps
+    if args.micro_steps and args.micro_steps > 0:
+        if args.micro_steps % args.sync_interval != 0:
+            raise RuntimeError("--micro-steps must be divisible by --sync-interval")
+        total_micro_steps = args.micro_steps
+        target_updates = args.micro_steps // args.sync_interval
 
     run_dir = init_run_dir(args.log_dir, args.run_name, rank)
     loss_history: List[Tuple[int, float, float]] = []
@@ -529,7 +538,7 @@ def main() -> None:
             batch_size=args.batch_size,
             img_size=args.imgsz,
             num_classes=args.num_classes,
-            steps=args.steps,
+            steps=target_updates,
             rank=rank,
             world_size=world_size,
             workers=args.workers,
@@ -576,7 +585,6 @@ def main() -> None:
     criterion = torch.nn.CrossEntropyLoss() if task == "classify" else None
 
     data_iter = infinite_loader(loader)
-    total_micro_steps = args.steps * args.sync_interval
     update_step = 0
 
     torch.cuda.synchronize(device)
@@ -710,7 +718,7 @@ def main() -> None:
                 synced[param].zero_()
 
             update_step += 1
-            if update_step % max(1, args.steps // 10) == 0 or update_step == 1:
+            if update_step % max(1, target_updates // 10) == 0 or update_step == 1:
                 loss_scalar = raw_loss.to(torch.float32)
                 dist.all_reduce(loss_scalar, op=dist.ReduceOp.SUM)
                 loss_scalar.div_(world_size)
@@ -722,7 +730,7 @@ def main() -> None:
                     elapsed = time.time() - start_time
                     loss_history.append((update_step, float(loss_scalar.item()), elapsed))
                     print(
-                        f"[update {update_step}/{args.steps}] "
+                        f"[update {update_step}/{target_updates}] "
                         f"loss={loss_scalar.item():.4f} elapsed={elapsed:.1f}s"
                     )
 
@@ -756,8 +764,9 @@ def main() -> None:
             summary = {
                 "run_name": args.run_name,
                 "task": task,
-                "steps": args.steps,
+                "steps": target_updates,
                 "sync_interval": args.sync_interval,
+                "micro_steps": args.micro_steps if args.micro_steps > 0 else None,
                 "total_time_s": total_time,
                 "final_loss": loss_history[-1][1] if loss_history else None,
                 "final_accuracy": final_accuracy,

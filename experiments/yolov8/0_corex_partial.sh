@@ -1,6 +1,10 @@
+export TORCH_DISTRIBUTED_DEBUG=DETAIL
+export NCCL_ASYNC_ERROR_HANDLING=1
+export CUDA_LAUNCH_BLOCKING=1
 export NCCL_DEBUG=INFO
 export NCCL_IB_DISABLE=1
 export NCCL_SOCKET_IFNAME=ens1f0
+export NCCL_PORT_RANGE=30000-30100
 torchrun \
   --nproc_per_node=4 \
   --nnodes=2 \
