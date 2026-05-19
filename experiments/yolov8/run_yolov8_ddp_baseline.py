@@ -560,7 +560,7 @@ def main() -> None:
                     f"[update {update_step}/{args.steps}] "
                     f"loss={loss_scalar.item():.4f} elapsed={elapsed:.1f}s"
                 )
-
+    dist.barrier()
     if task == "detect" and not args.no_eval and world_size > 1 and args.eval_ddp:
         try:
             yolo.model = ddp_model.module
@@ -576,8 +576,8 @@ def main() -> None:
                 verbose=False,
                 plots=False,
             )
-            if rank == 0:
-                final_accuracy = extract_detection_metric(results)
+            # if rank == 0:
+            final_accuracy = extract_detection_metric(results)
         except Exception as exc:
             if rank == 0:
                 print(f"[warn] detection eval failed: {exc}")
