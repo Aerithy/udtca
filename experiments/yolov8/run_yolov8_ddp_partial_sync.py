@@ -452,6 +452,12 @@ def main() -> None:
     parser.add_argument("--lr", type=float, default=0.01)
     parser.add_argument("--weight-decay", type=float, default=1e-4)
     parser.add_argument("--grad-clip", type=float, default=0.0)
+    parser.add_argument(
+        "--grad-clip-steps",
+        type=int,
+        default=0,
+        help="Apply grad clip only for the first N update steps (0 = always if enabled)",
+    )
     parser.add_argument("--workers", type=int, default=4)
     parser.add_argument("--seed", type=int, default=2026)
     parser.add_argument("--no-scale-loss", action="store_true")
@@ -710,7 +716,8 @@ def main() -> None:
                 param.grad = synced[param]
 
             if args.grad_clip > 0:
-                torch.nn.utils.clip_grad_norm_(params, args.grad_clip)
+                if args.grad_clip_steps <= 0 or update_step < args.grad_clip_steps:
+                    torch.nn.utils.clip_grad_norm_(params, args.grad_clip)
 
             optimizer.step()
             optimizer.zero_grad(set_to_none=True)

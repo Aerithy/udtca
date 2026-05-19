@@ -20,5 +20,6 @@ torchrun \
   --micro-steps 100 \
   --lr 0.01 \
   --grad-clip 5.0 \
+  --grad-clip-steps 5 \
   --run-name partial  \
   # --debug-sync
