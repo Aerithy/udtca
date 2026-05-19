@@ -3,11 +3,12 @@ import csv
 import json
 import math
 import os
+import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import torch
 import torch.distributed as dist
@@ -34,6 +35,21 @@ except ImportError:  # pragma: no cover - depends on optional numpy
 
 
 MIN_SYNTHETIC_SAMPLES = 128
+
+
+def import_bitscom():
+    try:
+        import bitscom
+
+        return bitscom
+    except ImportError:
+        repo_root = Path(__file__).resolve().parents[2]
+        bitscom_python = repo_root / "bitscom" / "python"
+        if bitscom_python.exists():
+            sys.path.insert(0, str(bitscom_python))
+        import bitscom
+
+        return bitscom
 
 
 class SyntheticClassificationDataset(Dataset):
@@ -424,7 +440,7 @@ def sync_bucket(
 
 @dataclass
 class PendingSync:
-    work: dist.Work
+    work: Any
     flat: torch.Tensor
     bucket: List[torch.nn.Parameter]
 
@@ -434,11 +450,15 @@ def launch_bucket_sync(
     bucket: List[torch.nn.Parameter],
     residuals: Dict[torch.nn.Parameter, torch.Tensor],
     group,
+    lowbit_group=None,
 ) -> Optional[PendingSync]:
     flat = torch.cat([residuals[p].view(-1) for p in bucket], dim=0)
     if flat.numel() == 0:
         return None
-    work = dist.all_reduce(flat, op=dist.ReduceOp.SUM, group=group, async_op=True)
+    if lowbit_group is not None:
+        work = lowbit_group.all_reduce(flat, op=dist.ReduceOp.SUM, async_op=True)
+    else:
+        work = dist.all_reduce(flat, op=dist.ReduceOp.SUM, group=group, async_op=True)
     return PendingSync(work=work, flat=flat, bucket=bucket)
 
 
@@ -489,6 +509,29 @@ def main() -> None:
     parser.add_argument("--workers", type=int, default=4)
     parser.add_argument("--seed", type=int, default=2026)
     parser.add_argument("--no-scale-loss", action="store_true")
+    parser.add_argument(
+        "--comm-backend",
+        type=str,
+        default="nccl",
+        choices=("nccl", "bitscom"),
+        help="Bucket gradient communication backend.",
+    )
+    parser.add_argument(
+        "--bitwidth",
+        type=int,
+        default=4,
+        help="bitscom low-bit communication bitwidth.",
+    )
+    parser.add_argument(
+        "--simulate-quantization",
+        action="store_true",
+        help="For bitscom bitwidth >= 8, simulate quantize/dequantize before NCCL all-reduce.",
+    )
+    parser.add_argument(
+        "--stochastic-rounding",
+        action="store_true",
+        help="Enable stochastic rounding in bitscom quantization.",
+    )
     parser.add_argument("--log-dir", type=str, default="experiments/yolov8/outputs")
     parser.add_argument("--run-name", type=str, default="partial")
     parser.add_argument("--no-eval", action="store_true")
@@ -516,6 +559,16 @@ def main() -> None:
     rank, world_size, local_rank = init_distributed()
     print(f"[main] after init_distributed rank={rank} world_size={world_size}", flush=True)
     device = torch.device(f"cuda:{local_rank}")
+
+    lowbit_group = None
+    if args.comm_backend == "bitscom":
+        bitscom = import_bitscom()
+        lowbit_group = bitscom.LowBitGroup(
+            bitwidth=args.bitwidth,
+            process_group=dist.group.WORLD,
+            simulate_quantization=args.simulate_quantization,
+            stochastic_rounding=args.stochastic_rounding,
+        )
 
     total_micro_steps = args.steps * args.sync_interval
     target_updates = args.steps
@@ -609,7 +662,8 @@ def main() -> None:
         print(
             f"[setup] total params={total_params:.2f}M "
             f"bucket_numel={bucket_numel} buckets={len(buckets)} "
-            f"sync_interval={args.sync_interval}"
+            f"sync_interval={args.sync_interval} comm_backend={args.comm_backend}"
+            + (f" bitwidth={args.bitwidth}" if args.comm_backend == "bitscom" else "")
         )
 
     residuals = {p: torch.zeros_like(p, device=device) for p in params}
@@ -712,6 +766,7 @@ def main() -> None:
                 bucket=bucket,
                 residuals=residuals,
                 group=dist.group.WORLD,
+                lowbit_group=lowbit_group,
             )
             if pending is not None:
                 pending_by_bucket[bucket_idx] = pending
@@ -845,6 +900,14 @@ def main() -> None:
                 "task": task,
                 "steps": target_updates,
                 "sync_interval": args.sync_interval,
+                "comm_backend": args.comm_backend,
+                "bitwidth": args.bitwidth if args.comm_backend == "bitscom" else None,
+                "simulate_quantization": (
+                    args.simulate_quantization if args.comm_backend == "bitscom" else None
+                ),
+                "stochastic_rounding": (
+                    args.stochastic_rounding if args.comm_backend == "bitscom" else None
+                ),
                 "micro_steps": args.micro_steps if args.micro_steps > 0 else None,
                 "total_time_s": total_time,
                 "final_loss": loss_history[-1][1] if loss_history else None,
