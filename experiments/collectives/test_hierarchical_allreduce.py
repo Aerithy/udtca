@@ -250,7 +250,7 @@ def main():
     correct = test_correctness(rank, world_size, local_rank, device)
     dist.barrier()
     
-    测试2: 单节点fallback
+    # 测试2: 单节点fallback
     if rank == 0:
         print("\n=== Test 2: Single Node Fallback ===")
     # single_node_ok = test_single_node_fallback(rank, world_size, local_rank)

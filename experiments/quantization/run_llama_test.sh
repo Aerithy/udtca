@@ -1,0 +1,14 @@
+torchrun --nproc_per_node=8 experiments/quantization/run_llama7b_polar_dp_pp.py \
+  --pp-size 8 \
+  --train-mode baseline \
+  --baseline-mode manual \
+  --method bitscom \
+  --bitwidth 4 \
+  --stochastic-rounding \
+  --simulate-quantization \
+  --dataset wikitext \
+  --dataset-config wikitext-2-raw-v1 \
+  --seq-length 256 \
+  --batch-size 1 \
+  --micro-batches 16 \
+  --max-steps 20
