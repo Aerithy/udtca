@@ -378,6 +378,46 @@ def infinite_loader(loader: DataLoader) -> Iterable[Tuple[torch.Tensor, torch.Te
             yield batch
 
 
+def sync_all_gradients_at_step_end(
+    params: List[torch.nn.Parameter],
+    *,
+    world_size: int,
+    group,
+) -> None:
+    grad_chunks = []
+    used_flags = []
+    for param in params:
+        if param.grad is None:
+            grad_chunks.append(torch.zeros(param.numel(), dtype=param.dtype, device=param.device))
+            used_flags.append(0.0)
+        else:
+            grad_chunks.append(param.grad.detach().contiguous().view(-1))
+            used_flags.append(1.0)
+
+    if not grad_chunks:
+        return
+
+    flat = torch.cat(grad_chunks, dim=0)
+    if flat.numel() == 0:
+        return
+
+    used = torch.tensor(used_flags, dtype=torch.float32, device=flat.device)
+    dist.all_reduce(flat, op=dist.ReduceOp.SUM, group=group)
+    dist.all_reduce(used, op=dist.ReduceOp.SUM, group=group)
+    flat.div_(world_size)
+
+    offset = 0
+    for param, was_used in zip(params, used):
+        numel = int(param.numel())
+        if was_used.item() > 0:
+            if param.grad is None:
+                param.grad = torch.empty_like(param, memory_format=torch.preserve_format)
+            param.grad.copy_(flat[offset : offset + numel].view_as(param))
+        else:
+            param.grad = None
+        offset += numel
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="YOLOv8 DDP baseline training")
     parser.add_argument("--model", type=str, default="yolov8n-cls.pt")
@@ -519,24 +559,32 @@ def main() -> None:
         if task == "detect":
             ensure_detection_hyp(ddp_model.module)
             batch = move_batch_to_device(batch, device)
-            outputs = ddp_model(batch)
-            loss = outputs[0] if isinstance(outputs, (list, tuple)) else outputs
-            if torch.is_tensor(loss) and loss.ndim != 0:
-                loss = loss.mean()
-            raw_loss = loss.detach()
-            loss.backward()
+            with ddp_model.no_sync():
+                outputs = ddp_model(batch)
+                loss = outputs[0] if isinstance(outputs, (list, tuple)) else outputs
+                if torch.is_tensor(loss) and loss.ndim != 0:
+                    loss = loss.mean()
+                raw_loss = loss.detach()
+                loss.backward()
         else:
             images, labels = batch
             images = images.to(device, non_blocking=True)
             labels = labels.to(device, non_blocking=True)
 
-            logits = ddp_model(images)
-            loss = criterion(logits, labels)
-            preds = logits.argmax(dim=1)
-            correct = (preds == labels).sum().to(torch.float32)
-            total = torch.tensor(float(labels.numel()), device=device)
-            raw_loss = loss.detach()
-            loss.backward()
+            with ddp_model.no_sync():
+                logits = ddp_model(images)
+                loss = criterion(logits, labels)
+                preds = logits.argmax(dim=1)
+                correct = (preds == labels).sum().to(torch.float32)
+                total = torch.tensor(float(labels.numel()), device=device)
+                raw_loss = loss.detach()
+                loss.backward()
+
+        sync_all_gradients_at_step_end(
+            params,
+            world_size=world_size,
+            group=dist.group.WORLD,
+        )
 
         if args.grad_clip > 0:
             torch.nn.utils.clip_grad_norm_(params, args.grad_clip)
