@@ -36,15 +36,15 @@ def init_distributed():
     world_size = dist.get_world_size()
     
     # 获取节点信息（通过环境变量或计算）
-    node_id = int(os.environ.get("NODE_RANK", rank // 2))  # 假设每节点2卡
-    local_rank = rank % 2
+    node_id = int(os.environ.get("NODE_RANK", rank // 4))  # 假设每节点2卡
+    local_rank = rank % 4
     
     return rank, world_size, local_rank, node_id
 
 def build_hierarchical_groups(rank, world_size):
     """构建本地组和节点间组"""
     # 默认每节点2卡
-    gpus_per_node = int(os.environ.get("GPUS_PER_NODE", 2))
+    gpus_per_node = int(os.environ.get("GPUS_PER_NODE", 4))
     num_nodes = world_size // gpus_per_node
     
     node_id = rank // gpus_per_node
