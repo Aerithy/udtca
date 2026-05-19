@@ -1,0 +1,10 @@
+{
+  "run_name": "partial",
+  "task": "detect",
+  "steps": 25,
+  "sync_interval": 4,
+  "micro_steps": 100,
+  "total_time_s": 202.5722255706787,
+  "final_loss": 20.462541580200195,
+  "final_accuracy": null
+}

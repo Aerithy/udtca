@@ -175,6 +175,28 @@ def _load_data_yaml(data_yaml: str) -> Dict:
     return data
 
 
+def resolve_eval_yaml(data_yaml: str, output_dir: Optional[Path]) -> str:
+    data = _load_data_yaml(data_yaml)
+    yaml_dir = Path(data_yaml).resolve().parent
+    root = data.get("path", "")
+    if root:
+        root_path = Path(root)
+        if not root_path.is_absolute():
+            root_path = (yaml_dir / root_path).resolve()
+    else:
+        root_path = yaml_dir
+    data["path"] = str(root_path)
+
+    if yaml is None:
+        raise RuntimeError("PyYAML is required for YAML datasets.")
+    out_dir = output_dir or Path("/tmp")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / f"eval_{Path(data_yaml).stem}_{int(time.time())}.yaml"
+    with out_path.open("w", encoding="utf-8") as handle:
+        yaml.safe_dump(data, handle)
+    return str(out_path)
+
+
 def _resolve_yaml_path(data_yaml: str, value: str, root: str) -> Path:
     yaml_dir = Path(data_yaml).resolve().parent
     if root:
@@ -542,8 +564,11 @@ def main() -> None:
             try:
                 yolo.model = ddp_model.module
                 yolo.model.eval()
+                eval_data = args.data
+                if args.data.endswith((".yaml", ".yml")):
+                    eval_data = resolve_eval_yaml(args.data, run_dir)
                 results = yolo.val(
-                    data=args.data,
+                    data=eval_data,
                     imgsz=args.imgsz,
                     batch=args.batch_size,
                     device=0,
