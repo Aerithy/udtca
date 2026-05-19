@@ -24,4 +24,5 @@ torchrun \
   --grad-clip 5.0 \
   --grad-clip-steps 5 \
   --run-name partial  \
+  --eval-ddp
   # --debug-sync

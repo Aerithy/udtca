@@ -581,8 +581,8 @@ def main() -> None:
         except Exception as exc:
             if rank == 0:
                 print(f"[warn] detection eval failed: {exc}")
+                
     dist.barrier()
-    dist.destroy_process_group()
 
     if rank == 0:
         total_time = time.time() - start_time
@@ -625,6 +625,9 @@ def main() -> None:
             summary_path = run_dir / "summary.json"
             with summary_path.open("w", encoding="utf-8") as handle:
                 json.dump(summary, handle, indent=2)
+                
+    dist.barrier()
+    dist.destroy_process_group()
 
 
 if __name__ == "__main__":
