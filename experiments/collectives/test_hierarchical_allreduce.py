@@ -235,7 +235,7 @@ def main():
     bitscom.init(bitwidth=4)
     
     rank, world_size, local_rank, node_id = init_distributed()
-    device = torch.device(f"cuda:{rank}")
+    device = torch.device(f"cuda:{local_rank}")
     torch.cuda.set_device(device)
     
     if rank == 0:
