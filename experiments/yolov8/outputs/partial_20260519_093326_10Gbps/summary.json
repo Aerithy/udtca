@@ -4,7 +4,7 @@
   "steps": 25,
   "sync_interval": 4,
   "micro_steps": 100,
-  "total_time_s": 199.20973253250122,
-  "final_loss": 19.638391494750977,
+  "total_time_s": 202.58229112625122,
+  "final_loss": 19.228609085083008,
   "final_accuracy": null
 }

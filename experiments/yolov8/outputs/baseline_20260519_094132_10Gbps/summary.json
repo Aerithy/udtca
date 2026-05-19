@@ -2,7 +2,7 @@
   "run_name": "baseline",
   "task": "detect",
   "steps": 100,
-  "total_time_s": 205.6790964603424,
-  "final_loss": 10.693239212036133,
+  "total_time_s": 204.80811142921448,
+  "final_loss": 12.704354286193848,
   "final_accuracy": null
 }
