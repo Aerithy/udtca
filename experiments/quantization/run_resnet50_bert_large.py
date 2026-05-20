@@ -48,6 +48,52 @@ class BertSST2Dataset(Dataset):
         }
 
 
+class SyntheticBertDataset(Dataset):
+    def __init__(
+        self,
+        *,
+        dataset_size: int,
+        seq_len: int,
+        vocab_size: int,
+        num_labels: int,
+        seed: int,
+    ):
+        self.dataset_size = int(dataset_size)
+        self.seq_len = int(seq_len)
+        self.vocab_size = int(vocab_size)
+        self.num_labels = int(num_labels)
+        self.seed = int(seed)
+
+    def __len__(self):
+        return self.dataset_size
+
+    def __getitem__(self, idx):
+        generator = torch.Generator()
+        generator.manual_seed(self.seed + int(idx))
+        input_ids = torch.randint(
+            low=0,
+            high=self.vocab_size,
+            size=(self.seq_len,),
+            dtype=torch.long,
+            generator=generator,
+        )
+        input_ids[0] = 101
+        if self.seq_len > 1:
+            input_ids[-1] = 102
+        label = torch.randint(
+            low=0,
+            high=self.num_labels,
+            size=(),
+            dtype=torch.long,
+            generator=generator,
+        )
+        return {
+            "input_ids": input_ids,
+            "attention_mask": torch.ones(self.seq_len, dtype=torch.long),
+            "labels": label,
+        }
+
+
 def _limit_hf_dataset(dataset, dataset_size: int):
     if dataset_size <= 0:
         return dataset
@@ -129,20 +175,48 @@ def _build_bert_large_dataloader(
     batch_size: int,
     rank: int,
     world_size: int,
+    data_source: str,
+    num_labels: int,
+    seed: int,
 ):
-    download_cfg = DownloadConfig(local_files_only=not allow_download)
-    raw = load_dataset(
-        "glue",
-        "sst2",
-        split="train",
-        download_config=download_cfg,
-    )
-    raw = _limit_hf_dataset(raw, dataset_size)
-    tokenizer = AutoTokenizer.from_pretrained(
-        "bert-base-uncased",
-        local_files_only=not allow_download,
-    )
-    dataset = BertSST2Dataset(raw, tokenizer, seq_len)
+    if data_source not in {"auto", "glue", "synthetic"}:
+        raise ValueError(f"unsupported bert data source: {data_source}")
+
+    dataset = None
+    if data_source in {"auto", "glue"}:
+        try:
+            download_cfg = DownloadConfig(local_files_only=not allow_download)
+            raw = load_dataset(
+                "glue",
+                "sst2",
+                split="train",
+                download_config=download_cfg,
+            )
+            raw = _limit_hf_dataset(raw, dataset_size)
+            tokenizer = AutoTokenizer.from_pretrained(
+                "bert-base-uncased",
+                local_files_only=not allow_download,
+            )
+            dataset = BertSST2Dataset(raw, tokenizer, seq_len)
+        except Exception as exc:
+            if data_source == "glue":
+                raise
+            if rank == 0:
+                print(
+                    "[warn] GLUE/SST-2 is unavailable; falling back to "
+                    f"synthetic BERT data. Original error: {exc}",
+                    flush=True,
+                )
+
+    if dataset is None:
+        dataset = SyntheticBertDataset(
+            dataset_size=dataset_size,
+            seq_len=seq_len,
+            vocab_size=30522,
+            num_labels=num_labels,
+            seed=seed,
+        )
+
     sampler = torch.utils.data.distributed.DistributedSampler(
         dataset,
         num_replicas=world_size,
@@ -204,6 +278,9 @@ def _build_dataloader(
             batch_size=batch_size,
             rank=rank,
             world_size=world_size,
+            data_source=args.bert_data_source,
+            num_labels=args.bert_num_labels,
+            seed=args.data_seed,
         )
     raise ValueError(f"unsupported model: {model_name}")
 
@@ -222,6 +299,26 @@ def _model_run_shape(model_name: str, args: argparse.Namespace) -> Dict[str, int
             "batch_size": int(args.bert_batch_size),
             "dataset_size": int(args.bert_dataset_size),
             "seq_len": int(args.bert_seq_len),
+        }
+    raise ValueError(f"unsupported model: {model_name}")
+
+
+def _model_train_hparams(model_name: str, args: argparse.Namespace) -> Dict[str, float]:
+    if model_name == "resnet50":
+        return {
+            "lr": float(args.resnet_lr),
+            "warmup_ratio": float(args.resnet_warmup_ratio),
+            "min_lr_ratio": float(args.min_lr_ratio),
+            "grad_clip_norm": float(args.resnet_grad_clip_norm),
+            "weight_decay": float(args.resnet_weight_decay),
+        }
+    if model_name == "bert-large":
+        return {
+            "lr": float(args.bert_lr),
+            "warmup_ratio": float(args.bert_warmup_ratio),
+            "min_lr_ratio": float(args.min_lr_ratio),
+            "grad_clip_norm": float(args.bert_grad_clip_norm),
+            "weight_decay": float(args.bert_weight_decay),
         }
     raise ValueError(f"unsupported model: {model_name}")
 
@@ -271,6 +368,7 @@ def _run_train(
     steps: int,
     batch_size: int,
     seq_len: int,
+    hparams: Dict[str, float],
     cfg: CompressionConfig,
     args: argparse.Namespace,
     world_size: int,
@@ -283,19 +381,20 @@ def _run_train(
 
     optimizer = torch.optim.AdamW(
         model.parameters(),
-        lr=args.lr,
+        lr=hparams["lr"],
         betas=(0.9, 0.999),
         eps=1e-8,
-        weight_decay=args.weight_decay,
+        weight_decay=hparams["weight_decay"],
     )
-    warmup_steps = max(1, int(steps * args.warmup_ratio))
+    warmup_steps = max(1, int(steps * hparams["warmup_ratio"]))
 
     def lr_lambda(step_idx: int) -> float:
         if step_idx < warmup_steps:
             return float(step_idx + 1) / float(warmup_steps)
         progress = (step_idx - warmup_steps) / max(1, steps - warmup_steps)
         cosine = 0.5 * (1.0 + math.cos(math.pi * progress))
-        return args.min_lr_ratio + (1.0 - args.min_lr_ratio) * cosine
+        min_lr_ratio = hparams["min_lr_ratio"]
+        return min_lr_ratio + (1.0 - min_lr_ratio) * cosine
 
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_lambda)
     data_iter = _infinite_loader(dataloader)
@@ -329,8 +428,11 @@ def _run_train(
         if not _finite_grads(model.parameters()):
             optimizer.zero_grad(set_to_none=True)
         else:
-            if args.grad_clip_norm > 0:
-                torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip_norm)
+            if hparams["grad_clip_norm"] > 0:
+                torch.nn.utils.clip_grad_norm_(
+                    model.parameters(),
+                    hparams["grad_clip_norm"],
+                )
             optimizer.step()
             scheduler.step()
 
@@ -364,6 +466,10 @@ def _run_train(
         "avg_step_time_ms": (total_time_s / max(1, steps)) * 1000.0,
         "throughput": throughput,
         "throughput_name": throughput_name,
+        "lr": hparams["lr"],
+        "warmup_ratio": hparams["warmup_ratio"],
+        "grad_clip_norm": hparams["grad_clip_norm"],
+        "weight_decay": hparams["weight_decay"],
     }
 
 
@@ -394,19 +500,30 @@ def main() -> None:
     parser.add_argument("--resnet-dataset-size", type=int, default=512)
     parser.add_argument("--resnet-image-size", type=int, default=224)
     parser.add_argument("--resnet-num-classes", type=int, default=10)
+    parser.add_argument("--resnet-lr", type=float, default=2e-4)
+    parser.add_argument("--resnet-weight-decay", type=float, default=1e-2)
+    parser.add_argument("--resnet-warmup-ratio", type=float, default=0.08)
+    parser.add_argument("--resnet-grad-clip-norm", type=float, default=1.0)
 
     parser.add_argument("--bert-steps", type=int, default=120)
     parser.add_argument("--bert-batch-size", type=int, default=1)
     parser.add_argument("--bert-dataset-size", type=int, default=1024)
     parser.add_argument("--bert-seq-len", type=int, default=128)
     parser.add_argument("--bert-num-labels", type=int, default=2)
+    parser.add_argument("--bert-lr", type=float, default=5e-6)
+    parser.add_argument("--bert-weight-decay", type=float, default=1e-2)
+    parser.add_argument("--bert-warmup-ratio", type=float, default=0.15)
+    parser.add_argument("--bert-grad-clip-norm", type=float, default=0.5)
+    parser.add_argument(
+        "--bert-data-source",
+        choices=["auto", "glue", "synthetic"],
+        default="auto",
+        help="Use GLUE/SST-2, synthetic token data, or auto fallback.",
+    )
 
-    parser.add_argument("--lr", type=float, default=2e-5)
-    parser.add_argument("--weight-decay", type=float, default=1e-2)
-    parser.add_argument("--warmup-ratio", type=float, default=0.08)
     parser.add_argument("--min-lr-ratio", type=float, default=0.05)
-    parser.add_argument("--grad-clip-norm", type=float, default=1.0)
     parser.add_argument("--seed", type=int, default=2026)
+    parser.add_argument("--data-seed", type=int, default=17)
     parser.add_argument("--out-dir", type=str, default="experiments/results")
     parser.add_argument("--no-download", action="store_true")
     parser.add_argument("--smooth-window", type=int, default=4)
@@ -437,6 +554,7 @@ def main() -> None:
     try:
         for model_name in args.models:
             shape = _model_run_shape(model_name, args)
+            hparams = _model_train_hparams(model_name, args)
             dataloader = _build_dataloader(
                 model_name=model_name,
                 args=args,
@@ -463,7 +581,9 @@ def main() -> None:
                     print(
                         f"[run] model={model_name} method={method} "
                         f"steps={shape['steps']} batch={shape['batch_size']} "
-                        f"dataset={shape['dataset_size']}"
+                        f"dataset={shape['dataset_size']} lr={hparams['lr']} "
+                        f"warmup={hparams['warmup_ratio']} "
+                        f"clip={hparams['grad_clip_norm']}"
                     )
 
                 run = _run_train(
@@ -473,6 +593,7 @@ def main() -> None:
                     steps=shape["steps"],
                     batch_size=shape["batch_size"],
                     seq_len=shape["seq_len"],
+                    hparams=hparams,
                     cfg=cfg,
                     args=args,
                     world_size=world_size,
@@ -504,6 +625,10 @@ def main() -> None:
                             "batch_size": shape["batch_size"],
                             "steps": shape["steps"],
                             "bucket_numel": args.bucket_numel,
+                            "lr": run["lr"],
+                            "warmup_ratio": run["warmup_ratio"],
+                            "grad_clip_norm": run["grad_clip_norm"],
+                            "weight_decay": run["weight_decay"],
                         },
                     )
 
