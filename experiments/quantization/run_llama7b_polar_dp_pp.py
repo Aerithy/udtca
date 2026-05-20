@@ -294,6 +294,11 @@ def main():
         default=0,
         help="Print finite-check diagnostics for the first N training steps.",
     )
+    parser.add_argument(
+        "--disable-profiler",
+        action="store_true",
+        help="Disable torch.profiler during timed training runs.",
+    )
 
     args = parser.parse_args()
     args.using_polar = args.train_mode == "polar"
@@ -302,12 +307,12 @@ def main():
         raise RuntimeError("CUDA is required")
 
     if args.method != "none":
-        if args.train_mode == "polar":
+        if args.train_mode == "polar" and args.method != "bitscom":
             raise ValueError(
-                "--train-mode=polar does not support compressed DP sync; "
-                "use --train-mode=baseline with compression methods"
+                "--train-mode=polar currently supports only --method none or bitscom; "
+                "use --train-mode=baseline for quant8/topk/powersgd"
             )
-        if args.baseline_mode == "ddp":
+        if args.train_mode == "baseline" and args.baseline_mode == "ddp":
             raise ValueError(
                 "--baseline-mode=ddp does not support compressed DP sync; "
                 "use --baseline-mode=manual with compression methods"
