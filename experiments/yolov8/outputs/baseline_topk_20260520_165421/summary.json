@@ -1,0 +1,15 @@
+{
+  "run_name": "baseline_topk",
+  "task": "detect",
+  "steps": 100,
+  "method": "topk",
+  "bitwidth": null,
+  "topk_ratio": 0.01,
+  "powersgd_rank": null,
+  "powersgd_dim": null,
+  "simulate_quantization": null,
+  "stochastic_rounding": null,
+  "total_time_s": 209.38608026504517,
+  "final_loss": 11.970320701599121,
+  "final_accuracy": null
+}

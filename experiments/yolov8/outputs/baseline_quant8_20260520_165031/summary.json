@@ -1,0 +1,15 @@
+{
+  "run_name": "baseline_quant8",
+  "task": "detect",
+  "steps": 100,
+  "method": "quant8",
+  "bitwidth": null,
+  "topk_ratio": null,
+  "powersgd_rank": null,
+  "powersgd_dim": null,
+  "simulate_quantization": null,
+  "stochastic_rounding": null,
+  "total_time_s": 216.29606246948242,
+  "final_loss": 12.83718204498291,
+  "final_accuracy": null
+}

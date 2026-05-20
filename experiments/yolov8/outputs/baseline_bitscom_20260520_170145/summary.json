@@ -1,0 +1,15 @@
+{
+  "run_name": "baseline_bitscom",
+  "task": "detect",
+  "steps": 100,
+  "method": "bitscom",
+  "bitwidth": 4,
+  "topk_ratio": null,
+  "powersgd_rank": null,
+  "powersgd_dim": null,
+  "simulate_quantization": false,
+  "stochastic_rounding": false,
+  "total_time_s": 213.44855546951294,
+  "final_loss": 10.533491134643555,
+  "final_accuracy": null
+}

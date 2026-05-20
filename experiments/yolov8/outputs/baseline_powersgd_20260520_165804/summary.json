@@ -1,0 +1,15 @@
+{
+  "run_name": "baseline_powersgd",
+  "task": "detect",
+  "steps": 100,
+  "method": "powersgd",
+  "bitwidth": null,
+  "topk_ratio": null,
+  "powersgd_rank": 2,
+  "powersgd_dim": 1024,
+  "simulate_quantization": null,
+  "stochastic_rounding": null,
+  "total_time_s": 205.69658279418945,
+  "final_loss": 19.42584991455078,
+  "final_accuracy": null
+}
