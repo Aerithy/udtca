@@ -1,0 +1,3 @@
+model,method,avg_step_time_ms,throughput_tokens_per_s,final_loss,world_size,batch_size,steps,bucket_numel
+bert-large,bitscom,2391.8397023410457,428.12233570575233,0.6630293726921082,8,1,120,4000000
+bert-large,bitscom,2325.050909505808,880.8409276660977,0.7021560072898865,8,2,120,4000000,2e-06,0.15,0.5,0.01

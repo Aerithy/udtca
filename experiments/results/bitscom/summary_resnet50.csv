@@ -1,0 +1,3 @@
+model,method,avg_step_time_ms,throughput_samples_per_s,final_loss,world_size,batch_size,steps,bucket_numel
+resnet50,bitscom,289.94219296146184,441.4673100614002,1.4289841651916504,8,16,60,4000000
+resnet50,partial_bitscom,1059.1835300127666,120.84780056810098,0.125111386179924,8,16,60,4,4,5882131,0.0002,0.08,1.0,0.01
