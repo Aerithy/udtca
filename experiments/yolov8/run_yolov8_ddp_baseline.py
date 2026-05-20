@@ -3,6 +3,7 @@ import csv
 import json
 import math
 import os
+import sys
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -15,6 +16,12 @@ from torch.utils.data import DataLoader, Dataset
 from torch.utils.data.distributed import DistributedSampler
 
 from ultralytics import YOLO
+
+QUANTIZATION_DIR = Path(__file__).resolve().parents[1] / "quantization"
+if str(QUANTIZATION_DIR) not in sys.path:
+    sys.path.insert(0, str(QUANTIZATION_DIR))
+
+from common import CompressionConfig, reduce_flat
 
 try:  # optional dependency for detection datasets
     import yaml
@@ -33,6 +40,21 @@ except ImportError:  # pragma: no cover - depends on optional numpy
 
 
 MIN_SYNTHETIC_SAMPLES = 128
+
+
+def import_bitscom():
+    try:
+        import bitscom
+
+        return bitscom
+    except ImportError:
+        repo_root = Path(__file__).resolve().parents[2]
+        bitscom_python = repo_root / "bitscom" / "python"
+        if bitscom_python.exists():
+            sys.path.insert(0, str(bitscom_python))
+        import bitscom
+
+        return bitscom
 
 
 class SyntheticClassificationDataset(Dataset):
@@ -383,6 +405,8 @@ def sync_all_gradients_at_step_end(
     *,
     world_size: int,
     group,
+    cfg: CompressionConfig,
+    lowbit_group,
 ) -> None:
     grad_chunks = []
     used_flags = []
@@ -402,7 +426,13 @@ def sync_all_gradients_at_step_end(
         return
 
     used = torch.tensor(used_flags, dtype=torch.float32, device=flat.device)
-    dist.all_reduce(flat, op=dist.ReduceOp.SUM, group=group)
+    flat = reduce_flat(
+        flat,
+        group=group,
+        world_size=world_size,
+        cfg=cfg,
+        lowbit_group=lowbit_group,
+    )
     dist.all_reduce(used, op=dist.ReduceOp.SUM, group=group)
     flat.div_(world_size)
 
@@ -439,6 +469,18 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=2026)
     parser.add_argument("--log-dir", type=str, default="experiments/yolov8/outputs")
     parser.add_argument("--run-name", type=str, default="baseline")
+    parser.add_argument(
+        "--method",
+        choices=("none", "quant8", "topk", "powersgd", "bitscom"),
+        default="none",
+        help="Gradient synchronization/compression method.",
+    )
+    parser.add_argument("--bitwidth", type=int, default=4)
+    parser.add_argument("--topk-ratio", type=float, default=0.01)
+    parser.add_argument("--powersgd-rank", type=int, default=2)
+    parser.add_argument("--powersgd-dim", type=int, default=1024)
+    parser.add_argument("--simulate-quantization", action="store_true")
+    parser.add_argument("--stochastic-rounding", action="store_true")
     parser.add_argument("--no-eval", action="store_true")
     parser.add_argument("--eval-steps", type=int, default=10)
     parser.add_argument(
@@ -460,6 +502,39 @@ def main() -> None:
 
     rank, world_size, local_rank = init_distributed()
     device = torch.device(f"cuda:{local_rank}")
+
+    cfg = CompressionConfig(
+        args.method,
+        bitwidth=args.bitwidth,
+        topk_ratio=args.topk_ratio,
+        powersgd_rank=args.powersgd_rank,
+        powersgd_dim=args.powersgd_dim,
+        simulate_quantization=args.simulate_quantization,
+        stochastic_rounding=args.stochastic_rounding,
+    )
+    lowbit_group = None
+    if args.method == "bitscom":
+        bitscom = import_bitscom()
+        bitscom.init(bitwidth=args.bitwidth)
+        lowbit_group = bitscom.LowBitGroup(
+            bitwidth=args.bitwidth,
+            process_group=dist.group.WORLD,
+            simulate_quantization=args.simulate_quantization,
+            stochastic_rounding=args.stochastic_rounding,
+        )
+
+    if rank == 0:
+        print(
+            f"[sync] method={args.method}"
+            + (f" bitwidth={args.bitwidth}" if args.method == "bitscom" else "")
+            + (f" topk_ratio={args.topk_ratio}" if args.method == "topk" else "")
+            + (
+                f" powersgd_rank={args.powersgd_rank} powersgd_dim={args.powersgd_dim}"
+                if args.method == "powersgd"
+                else ""
+            ),
+            flush=True,
+        )
 
     run_dir = init_run_dir(args.log_dir, args.run_name, rank)
     loss_history: List[Tuple[int, float, float]] = []
@@ -584,6 +659,8 @@ def main() -> None:
             params,
             world_size=world_size,
             group=dist.group.WORLD,
+            cfg=cfg,
+            lowbit_group=lowbit_group,
         )
 
         if args.grad_clip > 0:
@@ -666,6 +743,17 @@ def main() -> None:
                 "run_name": args.run_name,
                 "task": task,
                 "steps": args.steps,
+                "method": args.method,
+                "bitwidth": args.bitwidth if args.method == "bitscom" else None,
+                "topk_ratio": args.topk_ratio if args.method == "topk" else None,
+                "powersgd_rank": args.powersgd_rank if args.method == "powersgd" else None,
+                "powersgd_dim": args.powersgd_dim if args.method == "powersgd" else None,
+                "simulate_quantization": (
+                    args.simulate_quantization if args.method == "bitscom" else None
+                ),
+                "stochastic_rounding": (
+                    args.stochastic_rounding if args.method == "bitscom" else None
+                ),
                 "total_time_s": total_time,
                 "final_loss": loss_history[-1][1] if loss_history else None,
                 "final_accuracy": final_accuracy,
