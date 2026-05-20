@@ -1,0 +1,2 @@
+model,method,avg_step_time_ms,throughput_tokens_per_s,final_loss,dp_world_size,pp_size
+llama7b,bitscom,7318.411826103693,5596.842726710423,4.244540214538574,2,8
