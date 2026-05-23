@@ -104,6 +104,8 @@ def _reduce_powersgd(
     rank = max(1, min(rank, rows, cols))
 
     q = torch.randn(cols, rank, device=flat.device, dtype=flat.dtype)
+    src_rank = dist.distributed_c10d.get_global_rank(group, 0)
+    dist.broadcast(q, src=src_rank, group=group)
     p = matrix @ q
     dist.all_reduce(p, op=dist.ReduceOp.SUM, group=group)
     p, _ = torch.linalg.qr(p, mode="reduced")
@@ -222,6 +224,8 @@ def save_loss_curve(
     run_name: str,
     losses: List[float],
     smooth_window: int,
+    step_times_s: Optional[List[float]] = None,
+    elapsed_times_s: Optional[List[float]] = None,
 ) -> Tuple[str, str]:
     import matplotlib.pyplot as plt
 
@@ -231,9 +235,19 @@ def save_loss_curve(
 
     with open(csv_path, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
-        writer.writerow(["step", "loss"])
+        header = ["step", "loss"]
+        if step_times_s is not None:
+            header.append("step_time_s")
+        if elapsed_times_s is not None:
+            header.append("elapsed_s")
+        writer.writerow(header)
         for idx, val in enumerate(losses, start=1):
-            writer.writerow([idx, val])
+            row = [idx, val]
+            if step_times_s is not None:
+                row.append(step_times_s[idx - 1] if idx <= len(step_times_s) else "")
+            if elapsed_times_s is not None:
+                row.append(elapsed_times_s[idx - 1] if idx <= len(elapsed_times_s) else "")
+            writer.writerow(row)
 
     def _moving_avg(vals: List[float], window: int) -> List[float]:
         if window <= 1:

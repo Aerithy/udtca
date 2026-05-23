@@ -9,6 +9,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.pipelining import PipelineStage, Schedule1F1B
+from torch.utils.tensorboard import SummaryWriter
 from torch.utils.data import DataLoader, Dataset
 from datasets import DownloadConfig, load_dataset
 from transformers import AutoTokenizer
@@ -197,8 +198,78 @@ def init_llama_weights(module: nn.Module) -> None:
         nn.init.ones_(module.weight)
 
 
+@torch.no_grad()
+def broadcast_stage_parameters(model: nn.Module, group) -> None:
+    src_rank = dist.distributed_c10d.get_global_rank(group, 0)
+    for param in model.parameters():
+        dist.broadcast(param.data, src=src_rank, group=group)
+    for buffer in model.buffers():
+        dist.broadcast(buffer.data, src=src_rank, group=group)
+
+
 def _method_dir(base: str, method: str) -> str:
     return os.path.join(base, "bitscom" if method == "bitscom" else "baselines")
+
+
+def _compression_description(args: argparse.Namespace, method: str) -> str:
+    descriptions = {
+        "none": "No gradient compression; dense DP gradient all-reduce.",
+        "quant8": "8-bit gradient quantization before DP synchronization.",
+        "topk": f"Top-k sparsification with topk_ratio={args.topk_ratio}.",
+        "powersgd": (
+            "PowerSGD low-rank gradient compression "
+            f"with rank={args.powersgd_rank}, dim={args.powersgd_dim}."
+        ),
+        "bitscom": (
+            "bitscom LowBitGroup gradient compression "
+            f"with bitwidth={args.bitwidth}."
+        ),
+    }
+    return descriptions.get(method, f"Unknown compression method: {method}")
+
+
+def _write_compression_metadata(
+    writer: SummaryWriter,
+    *,
+    args: argparse.Namespace,
+    method: str,
+    dp_world: int,
+    pp_size: int,
+    micro_batches: int,
+) -> None:
+    selected_methods = ", ".join(args.methods)
+    method_details = "\n".join(
+        f"- {name}: {_compression_description(args, name)}"
+        for name in args.methods
+    )
+    writer.add_text("compression/selected_methods", selected_methods, 0)
+    writer.add_text("compression/selected_methods_detail", method_details, 0)
+    writer.add_text(
+        "compression/current_method",
+        _compression_description(args, method),
+        0,
+    )
+    writer.add_text(
+        "run/config",
+        "\n".join(
+            [
+                f"method: {method}",
+                f"selected_methods: {selected_methods}",
+                f"batch_size: {args.batch_size}",
+                f"seq_length: {args.seq_length}",
+                f"lr: {args.lr}",
+                f"dp_world_size: {dp_world}",
+                f"pp_size: {pp_size}",
+                f"micro_batches: {micro_batches}",
+                f"bucket_numel: {args.bucket_numel}",
+                f"bitwidth: {args.bitwidth}",
+                f"topk_ratio: {args.topk_ratio}",
+                f"powersgd_rank: {args.powersgd_rank}",
+                f"powersgd_dim: {args.powersgd_dim}",
+            ]
+        ),
+        0,
+    )
 
 
 def main() -> None:
@@ -301,6 +372,7 @@ def main() -> None:
         )
         stage_model.to_empty(device=device, recurse=True)
         stage_model.apply(init_llama_weights)
+        broadcast_stage_parameters(stage_model, dp_group)
 
         stage = PipelineStage(
             stage_model,
@@ -332,11 +404,30 @@ def main() -> None:
             )
         schedule = Schedule1F1B(stage, n_microbatches=micro_batches, loss_fn=loss_fn)
 
+        writer = None
+        if stage.is_last and dp_rank == 0:
+            tb_dir = os.path.join(
+                _method_dir(args.out_dir, method),
+                "tensorboard",
+                f"llama7b_{method}",
+            )
+            writer = SummaryWriter(log_dir=tb_dir)
+            _write_compression_metadata(
+                writer,
+                args=args,
+                method=method,
+                dp_world=dp_world,
+                pp_size=pp_size,
+                micro_batches=micro_batches,
+            )
+
         global_step = 0
         losses: List[float] = []
         step_times: List[float] = []
+        elapsed_times: List[float] = []
 
         steps_per_epoch = max(1, int(args.steps_per_epoch))
+        run_t0 = time.perf_counter()
         for epoch in range(int(args.epochs)):
             step_in_epoch = 0
             if stage.is_last:
@@ -372,6 +463,12 @@ def main() -> None:
                     dist.all_reduce(loss_tensor, op=dist.ReduceOp.SUM, group=dp_group)
                     loss_tensor.div_(dp_world)
                     losses.append(float(loss_tensor.item()))
+                    if writer is not None:
+                        writer.add_scalar(
+                            f"Loss/train/{method}",
+                            float(loss_tensor.item()),
+                            global_step,
+                        )
                     if pbar is not None:
                         pbar.set_postfix({"loss": f"{loss.item():.4f}"})
                 else:
@@ -387,13 +484,33 @@ def main() -> None:
                     lowbit_group=lowbit_group,
                 )
 
+                step_log_idx = global_step
                 optimizer.step()
                 global_step += 1
                 step_in_epoch += 1
 
                 if stage.is_last:
                     torch.cuda.synchronize(device)
-                    step_times.append(time.perf_counter() - t0)
+                    step_time_s = time.perf_counter() - t0
+                    step_times.append(step_time_s)
+                    elapsed_times.append(time.perf_counter() - run_t0)
+                    if writer is not None:
+                        writer.add_scalar(
+                            f"Time/step_ms/{method}",
+                            step_time_s * 1000.0,
+                            step_log_idx,
+                        )
+                        writer.add_scalar(
+                            f"Throughput/tokens_per_s_step/{method}",
+                            measure_throughput_tokens(
+                                steps=1,
+                                batch_size=args.batch_size,
+                                seq_len=args.seq_length,
+                                world_size=dp_world,
+                                total_time_s=step_time_s,
+                            ),
+                            step_log_idx,
+                        )
 
             if args.max_steps > 0 and global_step >= args.max_steps:
                 break
@@ -415,6 +532,8 @@ def main() -> None:
                 run_name=run_name,
                 losses=losses,
                 smooth_window=args.smooth_window,
+                step_times_s=step_times,
+                elapsed_times_s=elapsed_times,
             )
 
             summary_path = os.path.join(out_dir, "summary_llama7b.csv")
@@ -430,6 +549,18 @@ def main() -> None:
                     "pp_size": pp_size,
                 },
             )
+            if writer is not None:
+                writer.add_scalar(
+                    "Summary/avg_step_time_ms",
+                    (total_time / max(1, len(losses))) * 1000.0,
+                    0,
+                )
+                writer.add_scalar("Summary/throughput_tokens_per_s", throughput, 0)
+                writer.add_scalar("Summary/final_loss", losses[-1] if losses else 0.0, 0)
+                writer.flush()
+
+        if writer is not None:
+            writer.close()
 
         barrier(dp_group)
 

@@ -229,7 +229,7 @@ class CompressedPolarParallel(PolarParallel):
         )
 
     def run(self, train_mode: str) -> None:
-        if train_mode == "polar":
+        if train_mode in {"polar", "diloco", "streaming-diloco"}:
             self.train()
         else:
             self._train()
@@ -258,9 +258,9 @@ def main():
     parser.add_argument("--comm-timing", type=int, default=-1)
     parser.add_argument(
         "--train-mode",
-        choices=["baseline", "polar"],
+        choices=["baseline", "polar", "diloco", "streaming-diloco"],
         default="baseline",
-        help="Use baseline DP sync or polar hooks; compression is currently baseline-only.",
+        help="Use baseline DP sync, polar hooks, blocking DiLoCo, or streaming DiLoCo.",
     )
     parser.add_argument(
         "--baseline-mode",
@@ -269,6 +269,54 @@ def main():
         help="Baseline DP sync strategy when train-mode=baseline.",
     )
     parser.add_argument("--max-steps", type=int, default=200)
+    parser.add_argument(
+        "--polar-hook",
+        "--polar_hook",
+        dest="polar_hook",
+        choices=["io", "momentum", "gpipe", "ef_only", "scaling_only", "none"],
+        default="io",
+        help=(
+            "Polar hook variant. Ablations: ef_only disables gradient scaling; "
+            "scaling_only disables error feedback; none disables both."
+        ),
+    )
+    parser.add_argument(
+        "--polar-beta",
+        "--polar_beta",
+        dest="polar_beta",
+        type=float,
+        default=0.9,
+    )
+    parser.add_argument(
+        "--local-sgd-steps",
+        "--local_sgd_steps",
+        dest="local_sgd_steps",
+        type=int,
+        default=10,
+        help="Parameter averaging interval for DiLoCo/Local-SGD modes.",
+    )
+    parser.add_argument(
+        "--local-sgd-mode",
+        "--local_sgd_mode",
+        dest="local_sgd_mode",
+        choices=["blocking", "streaming"],
+        default="blocking",
+        help="Use blocking or async-launched parameter averaging for Local-SGD.",
+    )
+    parser.add_argument(
+        "--run-label",
+        dest="run_label",
+        type=str,
+        default="",
+        help="Label used in per-step CSV filenames.",
+    )
+    parser.add_argument(
+        "--step-log-dir",
+        dest="step_log_dir",
+        type=str,
+        default="experiments/quantization/outputs/step_csv",
+        help="Directory for per-step CSV logs.",
+    )
 
     parser.add_argument(
         "--method",
@@ -302,6 +350,10 @@ def main():
 
     args = parser.parse_args()
     args.using_polar = args.train_mode == "polar"
+    if args.train_mode == "streaming-diloco":
+        args.local_sgd_mode = "streaming"
+    if args.local_sgd_steps <= 0:
+        raise ValueError("--local-sgd-steps must be positive")
 
     if not torch.cuda.is_available():
         raise RuntimeError("CUDA is required")
@@ -493,8 +545,8 @@ def main():
         eval_dataloader=eval_dataloader,
         eval_interval=args.eval_interval,
         eval_max_batches=args.eval_max_batches,
-        use_local_sgd=False,
-        local_sgd_steps=1,
+        use_local_sgd=args.train_mode in {"diloco", "streaming-diloco"},
+        local_sgd_steps=args.local_sgd_steps,
         baseline_mode=args.baseline_mode,
         compression_cfg=compression_cfg,
         bucket_numel=args.bucket_numel,
