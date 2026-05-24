@@ -22,15 +22,19 @@ cd "${SCRIPT_DIR}"
 
 RUN_ID="${RUN_ID:-$(date +%Y%m%d_%H%M%S)}"
 TRACE_LOG_DIR="${TRACE_LOG_DIR:-outputs/trace_logs}"
-mkdir -p "${TRACE_LOG_DIR}"
-LOG_FILE="${TRACE_LOG_DIR}/polar_bitscom_trace_node0_${RUN_ID}.log"
+TRACE_RUN_DIR="${TRACE_LOG_DIR}/polar_bitscom_trace_${RUN_ID}/node0"
+mkdir -p "${TRACE_RUN_DIR}"
 
 echo "[trace-demo] node_rank=0 run_id=${RUN_ID}"
 echo "[trace-demo] expect markers: [PolarParallel], [polar-step-debug], [polar-hook-debug], [bitscom-debug]"
-echo "[trace-demo] log_file=${LOG_FILE}"
+echo "[trace-demo] per-rank logs under ${TRACE_RUN_DIR}"
+echo "[trace-demo] torchrun writes rank-specific stdout/stderr files instead of one mixed log"
 
 set +e
-stdbuf -oL -eL torchrun --nproc_per_node="${NPROC_PER_NODE:-8}" \
+torchrun --log-dir "${TRACE_RUN_DIR}" \
+    --redirects 3 \
+    --tee 3 \
+    --nproc_per_node="${NPROC_PER_NODE:-8}" \
     --nnodes="${NNODES:-2}" \
     --node_rank="${NODE_RANK:-0}" \
     --master_addr="${MASTER_ADDR:-10.31.10.210}" \
@@ -49,10 +53,9 @@ stdbuf -oL -eL torchrun --nproc_per_node="${NPROC_PER_NODE:-8}" \
     --micro-batches "${MICRO_BATCHES:-16}" \
     --max-steps "${MAX_STEPS:-3}" \
     --seq-length "${SEQ_LENGTH:-640}" \
-    --disable-profiler \
-    2>&1 | tee "${LOG_FILE}"
-exit_code="${PIPESTATUS[0]}"
+    --disable-profiler
+exit_code="$?"
 set -e
 
-echo "[trace-demo] exit_code=${exit_code} log_file=${LOG_FILE}"
+echo "[trace-demo] exit_code=${exit_code} log_dir=${TRACE_RUN_DIR}"
 exit "${exit_code}"
