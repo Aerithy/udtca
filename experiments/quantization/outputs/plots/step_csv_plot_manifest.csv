@@ -1,0 +1,9 @@
+key,label,source_csv,final_step,final_elapsed_s,final_loss
+baseline,Baseline,experiments/quantization/outputs/step_csv/baseline.csv,49,1400.815362463938,2.3325514793395996
+polar,POLAR,experiments/quantization/outputs/step_csv/polar_full_2026-05-23_20-23_dp2_pp8.csv,49,367.70593224989716,4.214265823364258
+diloco,DiLoCo,experiments/quantization/outputs/step_csv/diloco_blocking_2026-05-23_21-07_dp2_pp8.csv,49,361.9062472610967,3.9640021324157715
+streaming_diloco,Streaming DiLoCo,experiments/quantization/outputs/step_csv/diloco_streaming_2026-05-23_21-15_dp2_pp8.csv,49,362.50323885900434,3.9736216068267822
+polar_full,Full POLAR,experiments/quantization/outputs/step_csv/polar_full_2026-05-23_20-23_dp2_pp8.csv,49,367.70593224989716,4.214265823364258
+no_error_feedback,No Error Feedback,experiments/quantization/outputs/step_csv/polar_no_error_feedback_2026-05-23_20-30_dp2_pp8.csv,49,368.0551363499835,4.282179832458496
+no_gradient_scaling,No Gradient Scaling,experiments/quantization/outputs/step_csv/polar_no_gradient_scaling_2026-05-23_20-36_dp2_pp8.csv,49,372.8133931279881,4.512053966522217
+no_error_feedback_no_gradient_scaling,No EF + No Scaling,experiments/quantization/outputs/step_csv/polar_none_2026-05-23_20-49_dp2_pp8.csv,49,380.2371401479468,4.42380428314209

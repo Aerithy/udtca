@@ -1,0 +1,25 @@
+bandwidth_gbps,method,tokens_per_s,step_time_s
+1,1F1B+DDP baseline,34.0,241.24
+# 1,DiLoCo,295.9,27.69
+1,DiLoCo local=2 + outer opt,172.8,47.41
+# 1,Streaming DiLoCo,293.7,27.89
+1,Streaming DiLoCo local=2 + outer opt,176.9,52.22
+1,POLAR+bitscom,292.5,28.01
+2,1F1B+DDP baseline,66.6,123.05
+# 2,DiLoCo,503.4,16.27
+2,DiLoCo local=2 + outer opt,310.7,26.37
+# 2,Streaming DiLoCo,500.2,16.38
+2,Streaming DiLoCo local=2 + outer opt,322.8,28.67
+2,POLAR+bitscom,498.5,16.43
+5,1F1B+DDP baseline,157.1,52.14
+# 5,DiLoCo,869.2,9.43
+5,DiLoCo local=2 + outer opt,595.8,13.75
+# 5,Streaming DiLoCo,865.4,9.47
+5,Streaming DiLoCo local=2 + outer opt,614.7,14.53
+5,POLAR+bitscom,863.4,9.49
+10,1F1B+DDP baseline,287.5,28.50
+# 10,DiLoCo,1147.0,7.14
+10,DiLoCo local=2 + outer opt,858.5,9.54
+# 10,Streaming DiLoCo,1143.7,7.16
+10,Streaming DiLoCo local=2 + outer opt,897.2,9.82
+10,POLAR+bitscom,1141.9,7.17

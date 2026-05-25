@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1350" height="680" viewBox="0 0 1350 680">
+<rect width="100%" height="100%" fill="white"/>
+<style>text{font-family:"Noto Sans CJK SC","Microsoft YaHei","PingFang SC",Arial,Helvetica,sans-serif;fill:#2f3437}.title{font-size:30px;font-weight:700}.axis{font-size:18px}.axis-title{font-size:22px;font-weight:600}.tick{font-size:15px;fill:#5c6266}.label{font-size:15px;font-weight:600;fill:#2f3437}.legend{font-size:18px}.legend-title{font-size:20px;font-weight:700}</style>
+<text x="675.0" y="42" text-anchor="middle" class="title">不同网络带宽下 Llama7B 训练吞吐</text>
+<line x1="95" y1="575.00" x2="1030" y2="575.00" stroke="#d9dee3" stroke-width="1" stroke-dasharray="2 4"/>
+<text x="83" y="580.00" text-anchor="end" class="tick">0</text>
+<line x1="95" y1="492.50" x2="1030" y2="492.50" stroke="#d9dee3" stroke-width="1" stroke-dasharray="2 4"/>
+<text x="83" y="497.50" text-anchor="end" class="tick">200</text>
+<line x1="95" y1="410.00" x2="1030" y2="410.00" stroke="#d9dee3" stroke-width="1" stroke-dasharray="2 4"/>
+<text x="83" y="415.00" text-anchor="end" class="tick">400</text>
+<line x1="95" y1="327.50" x2="1030" y2="327.50" stroke="#d9dee3" stroke-width="1" stroke-dasharray="2 4"/>
+<text x="83" y="332.50" text-anchor="end" class="tick">600</text>
+<line x1="95" y1="245.00" x2="1030" y2="245.00" stroke="#d9dee3" stroke-width="1" stroke-dasharray="2 4"/>
+<text x="83" y="250.00" text-anchor="end" class="tick">800</text>
+<line x1="95" y1="162.50" x2="1030" y2="162.50" stroke="#d9dee3" stroke-width="1" stroke-dasharray="2 4"/>
+<text x="83" y="167.50" text-anchor="end" class="tick">1000</text>
+<line x1="95" y1="80.00" x2="1030" y2="80.00" stroke="#d9dee3" stroke-width="1" stroke-dasharray="2 4"/>
+<text x="83" y="85.00" text-anchor="end" class="tick">1200</text>
+<line x1="95" y1="80" x2="95" y2="575" stroke="#3f454a" stroke-width="1.2"/>
+<line x1="95" y1="575" x2="1030" y2="575" stroke="#3f454a" stroke-width="1.2"/>
+<text x="562.5" y="646" text-anchor="middle" class="axis-title">网络带宽</text>
+<text x="28" y="327.5" text-anchor="middle" transform="rotate(-90 28 327.5)" class="axis-title">吞吐量（tokens/s）</text>
+<text x="211.88" y="607" text-anchor="middle" class="axis">1Gbps</text>
+<rect x="117.80" y="560.98" width="42.00" height="14.02" fill="#4c566a"/>
+<text x="138.80" y="554.98" text-anchor="middle" class="label">34</text>
+<rect x="166.51" y="503.72" width="42.00" height="71.28" fill="#9467bd"/>
+<text x="187.51" y="497.72" text-anchor="middle" class="label">173</text>
+<rect x="215.24" y="502.03" width="42.00" height="72.97" fill="#d62728"/>
+<text x="236.24" y="496.03" text-anchor="middle" class="label">177</text>
+<rect x="263.95" y="454.34" width="42.00" height="120.66" fill="#1f77b4"/>
+<text x="284.95" y="448.34" text-anchor="middle" class="label">292</text>
+<text x="445.62" y="607" text-anchor="middle" class="axis">2Gbps</text>
+<rect x="351.55" y="547.53" width="42.00" height="27.47" fill="#4c566a"/>
+<text x="372.55" y="541.53" text-anchor="middle" class="label">67</text>
+<rect x="400.26" y="446.84" width="42.00" height="128.16" fill="#9467bd"/>
+<text x="421.26" y="440.84" text-anchor="middle" class="label">311</text>
+<rect x="448.99" y="441.85" width="42.00" height="133.16" fill="#d62728"/>
+<text x="469.99" y="435.85" text-anchor="middle" class="label">323</text>
+<rect x="497.71" y="369.37" width="42.00" height="205.63" fill="#1f77b4"/>
+<text x="518.71" y="363.37" text-anchor="middle" class="label">498</text>
+<text x="679.38" y="607" text-anchor="middle" class="axis">5Gbps</text>
+<rect x="585.29" y="510.20" width="42.00" height="64.80" fill="#4c566a"/>
+<text x="606.29" y="504.20" text-anchor="middle" class="label">157</text>
+<rect x="634.01" y="329.23" width="42.00" height="245.77" fill="#9467bd"/>
+<text x="655.01" y="323.23" text-anchor="middle" class="label">596</text>
+<rect x="682.73" y="321.44" width="42.00" height="253.56" fill="#d62728"/>
+<text x="703.73" y="315.44" text-anchor="middle" class="label">615</text>
+<rect x="731.45" y="218.85" width="42.00" height="356.15" fill="#1f77b4"/>
+<text x="752.45" y="212.85" text-anchor="middle" class="label">863</text>
+<text x="913.12" y="607" text-anchor="middle" class="axis">10Gbps</text>
+<rect x="819.04" y="456.41" width="42.00" height="118.59" fill="#4c566a"/>
+<text x="840.04" y="450.41" text-anchor="middle" class="label">288</text>
+<rect x="867.76" y="220.87" width="42.00" height="354.13" fill="#9467bd"/>
+<text x="888.76" y="214.87" text-anchor="middle" class="label">858</text>
+<rect x="916.48" y="204.90" width="42.00" height="370.10" fill="#d62728"/>
+<text x="937.48" y="198.90" text-anchor="middle" class="label">897</text>
+<rect x="965.20" y="103.97" width="42.00" height="471.03" fill="#1f77b4"/>
+<text x="986.20" y="97.97" text-anchor="middle" class="label">1142</text>
+<text x="1075" y="150" class="legend-title">方法</text>
+<rect x="1075" y="170" width="20" height="20" rx="3" fill="#4c566a"/>
+<text x="1107" y="187" class="legend">1F1B+DDP 基线</text>
+<rect x="1075" y="210" width="20" height="20" rx="3" fill="#9467bd"/>
+<text x="1107" y="227" class="legend">DiLoCo</text>
+<rect x="1075" y="250" width="20" height="20" rx="3" fill="#d62728"/>
+<text x="1107" y="267" class="legend">Streaming DiLoCo</text>
+<rect x="1075" y="290" width="20" height="20" rx="3" fill="#1f77b4"/>
+<text x="1107" y="307" class="legend">本方法</text>
+</svg>

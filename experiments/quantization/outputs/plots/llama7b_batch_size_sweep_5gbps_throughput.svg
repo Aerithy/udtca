@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1350" height="700" viewBox="0 0 1350 700">
+<rect width="100%" height="100%" fill="white"/>
+<style>text{font-family:"Noto Sans CJK SC","Microsoft YaHei","PingFang SC",Arial,Helvetica,sans-serif;fill:#2f3437}.title{font-size:30px;font-weight:700}.axis{font-size:18px}.axis-title{font-size:22px;font-weight:600}.tick{font-size:15px;fill:#5c6266}.label{font-size:14px;font-weight:600;fill:#2f3437}.legend{font-size:18px}.legend-title{font-size:20px;font-weight:700}</style>
+<text x="675.0" y="42" text-anchor="middle" class="title">5Gbps 下不同 Batch Size 的训练吞吐</text>
+<line x1="105" y1="592.00" x2="1020" y2="592.00" stroke="#d9dee3" stroke-width="1" stroke-dasharray="2 4"/>
+<text x="93" y="597.00" text-anchor="end" class="tick">0</text>
+<line x1="105" y1="464.50" x2="1020" y2="464.50" stroke="#d9dee3" stroke-width="1" stroke-dasharray="2 4"/>
+<text x="93" y="469.50" text-anchor="end" class="tick">500</text>
+<line x1="105" y1="337.00" x2="1020" y2="337.00" stroke="#d9dee3" stroke-width="1" stroke-dasharray="2 4"/>
+<text x="93" y="342.00" text-anchor="end" class="tick">1000</text>
+<line x1="105" y1="209.50" x2="1020" y2="209.50" stroke="#d9dee3" stroke-width="1" stroke-dasharray="2 4"/>
+<text x="93" y="214.50" text-anchor="end" class="tick">1500</text>
+<line x1="105" y1="82.00" x2="1020" y2="82.00" stroke="#d9dee3" stroke-width="1" stroke-dasharray="2 4"/>
+<text x="93" y="87.00" text-anchor="end" class="tick">2000</text>
+<line x1="105" y1="82" x2="105" y2="592" stroke="#3f454a" stroke-width="1.2"/>
+<line x1="105" y1="592" x2="1020" y2="592" stroke="#3f454a" stroke-width="1.2"/>
+<text x="562.5" y="664" text-anchor="middle" class="axis-title">Batch size</text>
+<text x="30" y="337.0" text-anchor="middle" transform="rotate(-90 30 337.0)" class="axis-title">吞吐量（tokens/s）</text>
+<text x="219.38" y="626" text-anchor="middle" class="axis">16</text>
+<rect x="126.21" y="551.94" width="41.59" height="40.06" fill="#4c566a"/>
+<text x="147.01" y="545.94" text-anchor="middle" class="label">157</text>
+<rect x="174.46" y="440.07" width="41.59" height="151.93" fill="#9467bd"/>
+<text x="195.25" y="434.07" text-anchor="middle" class="label">596</text>
+<rect x="222.70" y="448.26" width="41.59" height="143.74" fill="#d62728"/>
+<text x="243.50" y="442.26" text-anchor="middle" class="label">564</text>
+<rect x="270.95" y="371.83" width="41.59" height="220.17" fill="#1f77b4"/>
+<text x="291.74" y="365.83" text-anchor="middle" class="label">863</text>
+<text x="448.12" y="626" text-anchor="middle" class="axis">32</text>
+<rect x="354.96" y="527.10" width="41.59" height="64.90" fill="#4c566a"/>
+<text x="375.76" y="521.10" text-anchor="middle" class="label">254</text>
+<rect x="403.21" y="336.77" width="41.59" height="255.23" fill="#9467bd"/>
+<text x="424.00" y="330.77" text-anchor="middle" class="label">1001</text>
+<rect x="451.45" y="341.90" width="41.59" height="250.10" fill="#d62728"/>
+<text x="472.25" y="335.90" text-anchor="middle" class="label">981</text>
+<rect x="499.70" y="267.79" width="41.59" height="324.21" fill="#1f77b4"/>
+<text x="520.49" y="261.79" text-anchor="middle" class="label">1271</text>
+<text x="676.88" y="626" text-anchor="middle" class="axis">48</text>
+<rect x="583.71" y="508.67" width="41.59" height="83.33" fill="#4c566a"/>
+<text x="604.51" y="502.67" text-anchor="middle" class="label">327</text>
+<rect x="631.96" y="257.75" width="41.59" height="334.25" fill="#9467bd"/>
+<text x="652.75" y="251.75" text-anchor="middle" class="label">1311</text>
+<rect x="680.20" y="258.51" width="41.59" height="333.49" fill="#d62728"/>
+<text x="701.00" y="252.51" text-anchor="middle" class="label">1308</text>
+<rect x="728.45" y="201.19" width="41.59" height="390.81" fill="#1f77b4"/>
+<text x="749.24" y="195.19" text-anchor="middle" class="label">1533</text>
+<text x="905.62" y="626" text-anchor="middle" class="axis">64</text>
+<rect x="812.46" y="496.66" width="41.59" height="95.34" fill="#4c566a"/>
+<text x="833.26" y="490.66" text-anchor="middle" class="label">374</text>
+<rect x="860.71" y="193.94" width="41.59" height="398.06" fill="#9467bd"/>
+<text x="881.50" y="187.94" text-anchor="middle" class="label">1561</text>
+<rect x="908.95" y="195.27" width="41.59" height="396.73" fill="#d62728"/>
+<text x="929.75" y="189.27" text-anchor="middle" class="label">1556</text>
+<rect x="957.20" y="98.98" width="41.59" height="493.02" fill="#1f77b4"/>
+<text x="977.99" y="92.98" text-anchor="middle" class="label">1933</text>
+<text x="1065" y="155" class="legend-title">方法</text>
+<rect x="1065" y="175" width="20" height="20" rx="3" fill="#4c566a"/>
+<text x="1097" y="192" class="legend">1F1B+DDP 基线</text>
+<rect x="1065" y="215" width="20" height="20" rx="3" fill="#9467bd"/>
+<text x="1097" y="232" class="legend">DiLoCo local=2</text>
+<rect x="1065" y="255" width="20" height="20" rx="3" fill="#d62728"/>
+<text x="1097" y="272" class="legend">Streaming DiLoCo local=2</text>
+<rect x="1065" y="295" width="20" height="20" rx="3" fill="#1f77b4"/>
+<text x="1097" y="312" class="legend">POLAR+bitscom</text>
+</svg>

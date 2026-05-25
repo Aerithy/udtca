@@ -1,0 +1,17 @@
+network_gbps,batch_size,method,throughput_tokens_per_s,final_ppl,simulated
+5,16,1F1B+DDP baseline,157.1,41.30,yes
+5,16,DiLoCo local=2 + outer opt,595.8,44.20,yes
+5,16,Streaming DiLoCo local=2 + outer opt,563.7,44.80,yes
+5,16,POLAR+bitscom,863.4,42.58,yes
+5,32,1F1B+DDP baseline,254.5,42.13,yes
+5,32,DiLoCo local=2 + outer opt,1000.9,45.53,yes
+5,32,Streaming DiLoCo local=2 + outer opt,980.8,46.14,yes
+5,32,POLAR+bitscom,1271.4,44.43,yes
+5,48,1F1B+DDP baseline,326.8,43.37,yes
+5,48,DiLoCo local=2 + outer opt,1310.8,47.74,yes
+5,48,Streaming DiLoCo local=2 + outer opt,1307.8,47.94,yes
+5,48,POLAR+bitscom,1532.6,47.88,yes
+5,64,1F1B+DDP baseline,373.9,45.43,yes
+5,64,DiLoCo local=2 + outer opt,1561.0,51.27,yes
+5,64,Streaming DiLoCo local=2 + outer opt,1555.8,51.07,yes
+5,64,POLAR+bitscom,1933.4,55.78,yes
