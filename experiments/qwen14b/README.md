@@ -8,6 +8,9 @@ Two-node experiment for Qwen2.5-14B-Instruct with:
 - TP = 2 within each pipeline stage
 - POLAR hook = `ef_lowmem`
 - bitscom DP communication = 4-bit
+- micro-batches = 8
+- per-device batch size = 8
+- sequence length = 256
 
 Run from either the repository root or this directory:
 

@@ -3,7 +3,7 @@ set -euo pipefail
 
 # Node 0 of 2. Each node uses 16 GPUs as 8 PP stages x 2 TP ranks.
 # Across nodes, ranks with the same local (PP, TP) coordinates form POLAR DP.
-# Conservative 32GB smoke-test defaults: low-memory EF + bitscom, batch 1, seq 256.
+# Conservative 32GB smoke-test defaults: low-memory EF + bitscom, seq 256.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
@@ -32,10 +32,10 @@ torchrun \
   --model-name Qwen/Qwen2.5-14B-Instruct \
   --pp-size 8 \
   --tp-size 2 \
-  --micro-batches 1 \
+  --micro-batches 8 \
   --comm-timing 0 \
   --max-steps 10 \
-  --per-device-batch-size 1 \
+  --per-device-batch-size 8 \
   --seq-len 256 \
   --lr 2e-4 \
   --dataset-name-or-path HuggingFaceFW/fineweb \

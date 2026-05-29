@@ -420,6 +420,30 @@ def main():
 
     args = parser.parse_args()
 
+    if args.pp_size <= 0 or args.tp_size <= 0:
+        raise ValueError("--pp-size and --tp-size must be positive")
+    if args.micro_batches < args.pp_size:
+        raise ValueError(
+            f"--micro-batches ({args.micro_batches}) must be >= "
+            f"--pp-size ({args.pp_size}) for an 8-stage pipeline."
+        )
+    if args.per_device_batch_size < args.micro_batches:
+        raise ValueError(
+            f"--per-device-batch-size ({args.per_device_batch_size}) must be >= "
+            f"--micro-batches ({args.micro_batches}) because pipeline "
+            "microbatching splits the batch dimension."
+        )
+    if args.per_device_batch_size % args.micro_batches != 0:
+        raise ValueError(
+            f"--per-device-batch-size ({args.per_device_batch_size}) must be "
+            f"divisible by --micro-batches ({args.micro_batches})."
+        )
+    if args.comm_timing != -1 and not (0 <= args.comm_timing < args.micro_batches):
+        raise ValueError(
+            f"--comm-timing must be -1 or in [0, {args.micro_batches - 1}], "
+            f"got {args.comm_timing}."
+        )
+
     bitscom_module = None
     if args.method == "bitscom":
         bitscom_module = import_bitscom()
