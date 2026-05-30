@@ -44,4 +44,5 @@ torchrun \
   --polar-bucket-numel 4000000 \
   --polar-max-inflight-buckets 1 \
   --method bitscom \
-  --bitwidth 4
+  --bitwidth 4 \
+  --debug-nan-steps 1
