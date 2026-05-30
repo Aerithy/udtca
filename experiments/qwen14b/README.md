@@ -41,8 +41,10 @@ offline, add `--hf-local-files-only` to both launch scripts.
 
 - [x] Fix the double label-shift bug: the dataset previously emitted shifted
   labels, while the loss function shifts logits/labels again.
-- [x] Complete TP support: the final `lm_head` now participates in tensor
-  parallelism while returning replicated logits for the existing loss path.
+- [x] Complete TP support: decoder layers and the final `lm_head` participate
+  in tensor parallelism. The `lm_head` output stays vocab-sharded and the loss
+  uses vocab-parallel cross entropy, avoiding the unsupported replicated-output
+  all-gather path.
 - [ ] Continue investigating memory imbalance: explain why stage 0 ranks use
   much more memory than other PP stages under the 2TP + 8PP layout. The
   training wrapper now prints per-stage parameter and CUDA memory snapshots.
