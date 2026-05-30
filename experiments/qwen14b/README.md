@@ -36,3 +36,15 @@ MASTER_ADDR=<node0_ip> MASTER_PORT=11234 bash experiments/qwen14b/1_train_qwen14
 
 If the Hugging Face cache is already present and the run should stay fully
 offline, add `--hf-local-files-only` to both launch scripts.
+
+## TODO
+
+- [x] Fix the double label-shift bug: the dataset previously emitted shifted
+  labels, while the loss function shifts logits/labels again.
+- [x] Complete TP support: the final `lm_head` now participates in tensor
+  parallelism while returning replicated logits for the existing loss path.
+- [ ] Continue investigating memory imbalance: explain why stage 0 ranks use
+  much more memory than other PP stages under the 2TP + 8PP layout. The
+  training wrapper now prints per-stage parameter and CUDA memory snapshots.
+- [ ] Leave `ef_lowmem` unchanged for this issue. It is the intended innovation
+  path and is not considered the active cause of the current abnormal run.

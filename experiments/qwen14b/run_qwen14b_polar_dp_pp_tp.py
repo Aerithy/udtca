@@ -103,7 +103,7 @@ class StreamingTokenDataset(IterableDataset):
                 chunk = buffer[: self.seq_len + 1]
                 buffer = buffer[self.seq_len + 1 :]
                 input_ids = torch.tensor(chunk[:-1], dtype=torch.long)
-                labels = torch.tensor(chunk[1:], dtype=torch.long)
+                labels = input_ids.clone()
                 attention_mask = torch.ones_like(input_ids)
                 yield {"input_ids": input_ids, "labels": labels, "attention_mask": attention_mask}
 
@@ -177,6 +177,7 @@ def _node_dataset_cache_path(args) -> Path:
     cache_dir = Path(args.dataset_cache_dir).expanduser()
     if not cache_dir.is_absolute():
         cache_dir = _REPO_ROOT / cache_dir
+    cache_version = "labels_unshifted_v2"
     node_label = f"node{_node_rank()}_{_safe_name(socket.gethostname())}"
     dataset_label = _safe_name(args.dataset_name_or_path)
     config_label = _safe_name(args.dataset_config)
@@ -185,7 +186,7 @@ def _node_dataset_cache_path(args) -> Path:
         cache_dir
         / (
             f"{node_label}_{dataset_label}_{config_label}"
-            f"_seq{args.seq_len}_samples{samples}.pt"
+            f"_seq{args.seq_len}_samples{samples}_{cache_version}.pt"
         )
     )
 
@@ -222,8 +223,9 @@ def _materialize_token_cache(args, tokenizer, cache_path: Path) -> None:
         while len(token_buffer) >= args.seq_len + 1:
             chunk = token_buffer[: args.seq_len + 1]
             token_buffer = token_buffer[args.seq_len + 1 :]
-            input_blocks.append(torch.tensor(chunk[:-1], dtype=torch.long))
-            label_blocks.append(torch.tensor(chunk[1:], dtype=torch.long))
+            input_ids = torch.tensor(chunk[:-1], dtype=torch.long)
+            input_blocks.append(input_ids)
+            label_blocks.append(input_ids.clone())
             mask_blocks.append(torch.ones(args.seq_len, dtype=torch.long))
             if len(input_blocks) >= target_samples:
                 payload = {
@@ -393,6 +395,8 @@ def partition_qwen_model(
         else:
             # Stage 1+: input is hidden states
             hidden_states = input_ids_or_hidden
+            if torch.is_floating_point(hidden_states) and not hidden_states.requires_grad:
+                hidden_states.requires_grad_(True)
 
         # Get sequence length for position embeddings
         seq_length = hidden_states.shape[1]
@@ -590,7 +594,16 @@ def main():
     parser.add_argument("--use-flash-attn", action="store_true", default=True)
     parser.add_argument("--bf16", action="store_true", default=True)
     parser.add_argument("--fp16", action="store_true", default=False)
-    parser.add_argument("--activation-checkpointing", action="store_true", default=True)
+    parser.add_argument(
+        "--activation-checkpointing",
+        action="store_true",
+        default=False,
+        help=(
+            "Enable HF gradient checkpointing. Disabled by default for PP "
+            "debugging because checkpoint requires PP boundary activations to "
+            "carry requires_grad."
+        ),
+    )
     parser.add_argument(
         "--init-from-pretrained",
         action="store_true",
