@@ -34,7 +34,7 @@ torchrun \
   --tp-size 2 \
   --micro-batches 32 \
   --comm-timing 8 \
-  --max-steps 10 \
+  --max-steps 200 \
   --per-device-batch-size 32 \
   --seq-len 256 \
   --lr 2e-4 \

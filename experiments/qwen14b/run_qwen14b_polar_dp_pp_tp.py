@@ -890,7 +890,7 @@ def main():
     if args.dataset_cache_samples <= 0:
         args.dataset_cache_samples = max(
             args.max_steps * args.per_device_batch_size,
-            args.per_device_batch_size * args.micro_batches,
+            args.per_device_batch_size,
         )
 
     bitscom_module = None
