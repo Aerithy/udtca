@@ -31,10 +31,10 @@ torchrun \
   --model-name Qwen/Qwen2.5-14B-Instruct \
   --pp-size 8 \
   --tp-size 2 \
-  --micro-batches 8 \
-  --comm-timing 0 \
+  --micro-batches 32 \
+  --comm-timing 8 \
   --max-steps 10 \
-  --per-device-batch-size 8 \
+  --per-device-batch-size 32 \
   --seq-len 256 \
   --lr 2e-4 \
   --dataset-name-or-path HuggingFaceFW/fineweb \
