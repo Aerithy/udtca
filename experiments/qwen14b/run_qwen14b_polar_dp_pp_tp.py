@@ -2,6 +2,7 @@
 import os
 import argparse
 import sys
+import socket
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -24,7 +25,7 @@ import torch.distributed as dist
 import torch.nn.functional as F
 from torch.distributed.pipelining import Schedule1F1B
 from torch.distributed.device_mesh import init_device_mesh
-from torch.utils.data import DataLoader, IterableDataset
+from torch.utils.data import DataLoader, Dataset, IterableDataset
 from datasets import load_dataset
 from transformers import AutoConfig, AutoTokenizer, AutoModelForCausalLM
 from tqdm import tqdm
@@ -77,6 +78,7 @@ class TrainConfig:
     fp16: bool = False
     activation_checkpointing: bool = True
     init_from_pretrained: bool = False
+    dataset_cache_path: Optional[str] = None
 
 
 # -----------------------------
@@ -106,12 +108,40 @@ class StreamingTokenDataset(IterableDataset):
                 yield {"input_ids": input_ids, "labels": labels, "attention_mask": attention_mask}
 
 
+class TokenBlockDataset(Dataset):
+    def __init__(self, cache_path: str):
+        payload = torch.load(cache_path, map_location="cpu")
+        self.input_ids = payload["input_ids"].to(torch.long)
+        self.labels = payload["labels"].to(torch.long)
+        self.attention_mask = payload["attention_mask"].to(torch.long)
+
+    def __len__(self):
+        return int(self.input_ids.shape[0])
+
+    def __getitem__(self, idx):
+        return {
+            "input_ids": self.input_ids[idx],
+            "labels": self.labels[idx],
+            "attention_mask": self.attention_mask[idx],
+        }
+
+
 def get_dataloader(
     cfg: TrainConfig,
     tokenizer,
     pp_size: int,
 ):
-    """Build streaming dataloader aligned with train_qwen.py."""
+    """Build dataloader from a node-local token cache when available."""
+    if cfg.dataset_cache_path:
+        tokenized_dataset = TokenBlockDataset(cfg.dataset_cache_path)
+        return DataLoader(
+            tokenized_dataset,
+            batch_size=cfg.per_device_batch_size,
+            num_workers=cfg.num_workers,
+            pin_memory=True,
+            drop_last=True,
+        )
+
     ds_kwargs = {}
     if cfg.dataset_config:
         ds_kwargs["name"] = cfg.dataset_config
@@ -128,6 +158,115 @@ def get_dataloader(
         drop_last=True
     )
     return dataloader
+
+
+def _safe_name(value: Optional[str]) -> str:
+    if not value:
+        return "none"
+    return "".join(ch if ch.isalnum() or ch in "-_." else "_" for ch in value)
+
+
+def _node_rank() -> int:
+    if "GROUP_RANK" in os.environ:
+        return int(os.environ["GROUP_RANK"])
+    local_world_size = int(os.environ.get("LOCAL_WORLD_SIZE", "1"))
+    return dist.get_rank() // max(local_world_size, 1)
+
+
+def _node_dataset_cache_path(args) -> Path:
+    cache_dir = Path(args.dataset_cache_dir).expanduser()
+    if not cache_dir.is_absolute():
+        cache_dir = _REPO_ROOT / cache_dir
+    node_label = f"node{_node_rank()}_{_safe_name(socket.gethostname())}"
+    dataset_label = _safe_name(args.dataset_name_or_path)
+    config_label = _safe_name(args.dataset_config)
+    samples = int(args.dataset_cache_samples)
+    return (
+        cache_dir
+        / (
+            f"{node_label}_{dataset_label}_{config_label}"
+            f"_seq{args.seq_len}_samples{samples}.pt"
+        )
+    )
+
+
+def _materialize_token_cache(args, tokenizer, cache_path: Path) -> None:
+    if cache_path.exists() and not args.refresh_dataset_cache:
+        return
+
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    ds_kwargs = {}
+    if args.dataset_config:
+        ds_kwargs["name"] = args.dataset_config
+
+    dataset = load_dataset(
+        args.dataset_name_or_path,
+        **ds_kwargs,
+        split="train",
+        streaming=True,
+    )
+
+    input_blocks: List[torch.Tensor] = []
+    label_blocks: List[torch.Tensor] = []
+    mask_blocks: List[torch.Tensor] = []
+    token_buffer: List[int] = []
+    target_samples = int(args.dataset_cache_samples)
+
+    for sample in dataset:
+        text = sample.get(args.text_field, "")
+        if not text:
+            continue
+        token_buffer.extend(
+            tokenizer(text, add_special_tokens=False)["input_ids"]
+        )
+        while len(token_buffer) >= args.seq_len + 1:
+            chunk = token_buffer[: args.seq_len + 1]
+            token_buffer = token_buffer[args.seq_len + 1 :]
+            input_blocks.append(torch.tensor(chunk[:-1], dtype=torch.long))
+            label_blocks.append(torch.tensor(chunk[1:], dtype=torch.long))
+            mask_blocks.append(torch.ones(args.seq_len, dtype=torch.long))
+            if len(input_blocks) >= target_samples:
+                payload = {
+                    "input_ids": torch.stack(input_blocks, dim=0),
+                    "labels": torch.stack(label_blocks, dim=0),
+                    "attention_mask": torch.stack(mask_blocks, dim=0),
+                }
+                tmp_path = cache_path.with_suffix(cache_path.suffix + ".tmp")
+                torch.save(payload, tmp_path)
+                os.replace(tmp_path, cache_path)
+                return
+
+    raise RuntimeError(
+        f"Dataset ended before {target_samples} token blocks could be built."
+    )
+
+
+def _prepare_node_local_hf_cache(args) -> Path:
+    cache_path = _node_dataset_cache_path(args)
+    local_rank = int(os.environ.get("LOCAL_RANK", "0"))
+
+    if local_rank == 0:
+        tokenizer_name = args.tokenizer_name or args.model_name
+        tokenizer = AutoTokenizer.from_pretrained(
+            tokenizer_name,
+            trust_remote_code=True,
+            local_files_only=args.hf_local_files_only,
+        )
+        if tokenizer.pad_token is None:
+            tokenizer.pad_token = tokenizer.eos_token
+        AutoConfig.from_pretrained(
+            args.model_name,
+            trust_remote_code=True,
+            local_files_only=args.hf_local_files_only,
+        )
+        _materialize_token_cache(args, tokenizer, cache_path)
+
+    dist.barrier()
+    if not cache_path.exists():
+        raise FileNotFoundError(
+            f"Node-local dataset cache was not created: {cache_path}"
+        )
+    return cache_path
 
 
 # -----------------------------
@@ -257,7 +396,7 @@ def partition_qwen_model(model, stage_idx: int, num_stages: int):
     return model
 
 
-def build_qwen_model(cfg: TrainConfig):
+def build_qwen_model(cfg: TrainConfig, *, local_files_only: bool = False):
     """Build Qwen model with configuration from train_qwen.py."""
     attn_impl = "flash_attention_2" if cfg.use_flash_attn else None
     kwargs = {
@@ -266,9 +405,17 @@ def build_qwen_model(cfg: TrainConfig):
         "trust_remote_code": True,
     }
     if cfg.init_from_pretrained:
-        model = AutoModelForCausalLM.from_pretrained(cfg.model_name, **kwargs)
+        model = AutoModelForCausalLM.from_pretrained(
+            cfg.model_name,
+            local_files_only=local_files_only,
+            **kwargs,
+        )
     else:
-        config = AutoConfig.from_pretrained(cfg.model_name, trust_remote_code=True)
+        config = AutoConfig.from_pretrained(
+            cfg.model_name,
+            trust_remote_code=True,
+            local_files_only=local_files_only,
+        )
         if attn_impl is not None:
             config._attn_implementation = attn_impl
         with torch.device("meta"):
@@ -286,10 +433,14 @@ def build_qwen_model(cfg: TrainConfig):
     return model
 
 
-def build_tokenizer(cfg: TrainConfig):
+def build_tokenizer(cfg: TrainConfig, *, local_files_only: bool = False):
     """Build tokenizer aligned with train_qwen.py."""
     tokenizer_name = cfg.tokenizer_name or cfg.model_name
-    tokenizer = AutoTokenizer.from_pretrained(tokenizer_name, trust_remote_code=True)
+    tokenizer = AutoTokenizer.from_pretrained(
+        tokenizer_name,
+        trust_remote_code=True,
+        local_files_only=local_files_only,
+    )
     
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
@@ -311,6 +462,27 @@ def main():
     parser.add_argument("--dataset-name-or-path", type=str, default="HuggingFaceFW/fineweb")
     parser.add_argument("--dataset-config", type=str, default=None)
     parser.add_argument("--text-field", type=str, default="text")
+    parser.add_argument(
+        "--dataset-cache-dir",
+        type=str,
+        default="experiments/qwen14b/cache",
+        help="Node-local token cache directory. LOCAL_RANK=0 creates it.",
+    )
+    parser.add_argument(
+        "--dataset-cache-samples",
+        type=int,
+        default=0,
+        help=(
+            "Number of token blocks to materialize per node. Default derives "
+            "from max-steps and per-device batch size."
+        ),
+    )
+    parser.add_argument("--refresh-dataset-cache", action="store_true")
+    parser.add_argument(
+        "--hf-local-files-only",
+        action="store_true",
+        help="Require model/tokenizer/dataset metadata to already be cached.",
+    )
     
     # Training hyperparameters (from config)
     parser.add_argument("--seq-len", type=int, default=256)
@@ -443,41 +615,17 @@ def main():
             f"--comm-timing must be -1 or in [0, {args.micro_batches - 1}], "
             f"got {args.comm_timing}."
         )
+    if args.dataset_cache_samples <= 0:
+        args.dataset_cache_samples = max(
+            args.max_steps * args.per_device_batch_size,
+            args.per_device_batch_size * args.micro_batches,
+        )
 
     bitscom_module = None
     if args.method == "bitscom":
         bitscom_module = import_bitscom()
         bitscom_module.init(bitwidth=args.bitwidth)
     
-    # Create config object aligned with train_qwen.py
-    cfg = TrainConfig(
-        model_name=args.model_name,
-        tokenizer_name=args.tokenizer_name,
-        dataset_name_or_path=args.dataset_name_or_path,
-        dataset_config=args.dataset_config,
-        text_field=args.text_field,
-        seq_len=args.seq_len,
-        per_device_batch_size=args.per_device_batch_size,
-        grad_accum_steps=args.grad_accum_steps,
-        lr=args.lr,
-        warmup_ratio=args.warmup_ratio,
-        max_tokens=args.max_tokens,
-        max_steps=args.max_steps,
-        weight_decay=args.weight_decay,
-        beta1=args.beta1,
-        beta2=args.beta2,
-        clip_norm=args.clip_norm,
-        log_interval=args.log_interval,
-        save_interval=args.save_interval,
-        save_dir=args.save_dir,
-        num_workers=args.num_workers,
-        use_flash_attn=args.use_flash_attn,
-        bf16=args.bf16,
-        fp16=args.fp16,
-        activation_checkpointing=args.activation_checkpointing,
-        init_from_pretrained=args.init_from_pretrained,
-    )
-
     # Initialize distributed
     dist.init_process_group(backend="nccl", init_method="env://")
     world_size = dist.get_world_size()
@@ -512,11 +660,43 @@ def main():
     # Enable TF32 for better performance
     torch.backends.cuda.matmul.allow_tf32 = True
 
+    dataset_cache_path = _prepare_node_local_hf_cache(args)
+
+    # Create config object aligned with train_qwen.py
+    cfg = TrainConfig(
+        model_name=args.model_name,
+        tokenizer_name=args.tokenizer_name,
+        dataset_name_or_path=args.dataset_name_or_path,
+        dataset_config=args.dataset_config,
+        text_field=args.text_field,
+        seq_len=args.seq_len,
+        per_device_batch_size=args.per_device_batch_size,
+        grad_accum_steps=args.grad_accum_steps,
+        lr=args.lr,
+        warmup_ratio=args.warmup_ratio,
+        max_tokens=args.max_tokens,
+        max_steps=args.max_steps,
+        weight_decay=args.weight_decay,
+        beta1=args.beta1,
+        beta2=args.beta2,
+        clip_norm=args.clip_norm,
+        log_interval=args.log_interval,
+        save_interval=args.save_interval,
+        save_dir=args.save_dir,
+        num_workers=args.num_workers,
+        use_flash_attn=args.use_flash_attn,
+        bf16=args.bf16,
+        fp16=args.fp16,
+        activation_checkpointing=args.activation_checkpointing,
+        init_from_pretrained=args.init_from_pretrained,
+        dataset_cache_path=str(dataset_cache_path),
+    )
+
     # Build tokenizer
-    tokenizer = build_tokenizer(cfg)
+    tokenizer = build_tokenizer(cfg, local_files_only=True)
     
     # Build and partition Qwen model
-    model = build_qwen_model(cfg)
+    model = build_qwen_model(cfg, local_files_only=True)
     stage_idx = pp_mesh.get_local_rank()
     tp_rank = device_mesh["tp"].get_local_rank() if tp_size > 1 else 0
     print(f"Stage index: {stage_idx} / {pp_size}; TP rank: {tp_rank} / {tp_size}")
