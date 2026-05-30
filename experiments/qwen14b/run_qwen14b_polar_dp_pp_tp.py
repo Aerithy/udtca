@@ -322,6 +322,38 @@ def partition_qwen_model(model, stage_idx: int, num_stages: int):
     original_model = model.model
     rope_theta = getattr(config, 'rope_theta', 10000.0)
     max_position_embeddings = getattr(config, 'max_position_embeddings', 4096)
+
+    def get_fallback_rotary_embedding(device):
+        rotary_emb = getattr(model.model, "_polar_rotary_emb", None)
+        if rotary_emb is not None:
+            return rotary_emb.to(device)
+
+        import inspect
+        from transformers.models.qwen2.modeling_qwen2 import Qwen2RotaryEmbedding
+
+        signature = inspect.signature(Qwen2RotaryEmbedding.__init__)
+        params = signature.parameters
+        kwargs = {}
+        if "config" in params:
+            kwargs["config"] = config
+            if "device" in params:
+                kwargs["device"] = device
+            rotary_emb = Qwen2RotaryEmbedding(**kwargs)
+        else:
+            head_dim = config.hidden_size // config.num_attention_heads
+            if "max_position_embeddings" in params:
+                kwargs["max_position_embeddings"] = max_position_embeddings
+            if "rope_theta" in params:
+                kwargs["rope_theta"] = rope_theta
+            elif "base" in params:
+                kwargs["base"] = rope_theta
+            if "device" in params:
+                kwargs["device"] = device
+            rotary_emb = Qwen2RotaryEmbedding(head_dim, **kwargs)
+
+        rotary_emb = rotary_emb.to(device)
+        model.model._polar_rotary_emb = rotary_emb
+        return rotary_emb
     
     # Custom forward method for partitioned model with proper RoPE handling
     def custom_forward(input_ids_or_hidden, attention_mask=None):
@@ -347,13 +379,7 @@ def partition_qwen_model(model, stage_idx: int, num_stages: int):
         elif hasattr(original_model, 'rotary_emb') and original_model.rotary_emb is not None:
             position_embeddings = original_model.rotary_emb(hidden_states, position_ids)
         else:
-            # Fallback: create rotary embedding if not found
-            from transformers.models.qwen2.modeling_qwen2 import Qwen2RotaryEmbedding
-            rotary_emb = Qwen2RotaryEmbedding(
-                config.hidden_size // config.num_attention_heads,
-                rope_theta=rope_theta,
-                max_position_embeddings=max_position_embeddings
-            ).to(hidden_states.device)
+            rotary_emb = get_fallback_rotary_embedding(hidden_states.device)
             position_embeddings = rotary_emb(hidden_states, position_ids)
 
         # Pass through layers
