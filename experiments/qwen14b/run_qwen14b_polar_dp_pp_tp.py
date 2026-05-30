@@ -51,6 +51,17 @@ def import_bitscom():
         return bitscom
 
 
+def str_to_bool(value):
+    if isinstance(value, bool):
+        return value
+    lowered = str(value).strip().lower()
+    if lowered in {"1", "true", "yes", "y", "on"}:
+        return True
+    if lowered in {"0", "false", "no", "n", "off"}:
+        return False
+    raise argparse.ArgumentTypeError(f"invalid boolean value: {value!r}")
+
+
 @dataclass
 class TrainConfig:
     model_name: str = "Qwen/Qwen2.5-14B-Instruct"
@@ -709,6 +720,12 @@ def main():
     parser.add_argument("--log-interval", type=int, default=10)
     parser.add_argument("--save-interval", type=int, default=1000)
     parser.add_argument("--save-dir", type=str, default="checkpoints/qwen2_5_14b_instruct")
+    parser.add_argument("--run-label", type=str, default="")
+    parser.add_argument(
+        "--step-log-dir",
+        type=str,
+        default="experiments/quantization/outputs/step_csv",
+    )
     parser.add_argument(
         "--debug-nan-steps",
         type=int,
@@ -749,7 +766,7 @@ def main():
     parser.add_argument("--tp-size", type=int, default=1)
     parser.add_argument("--micro-batches", type=int, default=1)
     parser.add_argument("--comm-timing", type=int, default=-1)
-    parser.add_argument("--using-polar", type=bool, default=True)
+    parser.add_argument("--using-polar", type=str_to_bool, default=True)
     
     # Polar hooks
     parser.add_argument(

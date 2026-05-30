@@ -1,23 +1,29 @@
-# Qwen14B Polar DP + PP + TP
+# Qwen14B 2DP x 8PP x 2TP Experiments
 
-Two-node experiment for Qwen2.5-14B-Instruct with:
+Two-node Qwen2.5-14B-Instruct experiments with:
 
 - 2 nodes x 16 GPUs = 32 GPUs
 - DP = 2 across nodes
-- PP = 8 within each node
-- TP = 2 within each pipeline stage
-- POLAR hook = `ef_lowmem`
-- bitscom DP communication = 4-bit
+- PP = 8
+- TP = 2
+- 1F1B pipeline schedule
 - micro-batches = 8
 - per-device batch size = 8
 - sequence length = 256
-- dataset cache = node-local token blocks under `experiments/qwen14b/cache`
+- node-local token cache under `experiments/qwen14b/cache`
 
-Only `LOCAL_RANK=0` on each node contacts Hugging Face. It warms the
-tokenizer/config cache and materializes the small token-block dataset cache;
-all other local ranks wait at a distributed barrier and then read local files.
+Only `LOCAL_RANK=0` on each node contacts Hugging Face to warm the
+tokenizer/config cache and materialize the token-block dataset cache. Other
+local ranks wait at a distributed barrier and then read local files.
 
-Run from either the repository root or this directory:
+## POLAR + bitscom
+
+This is the innovation path:
+
+- `--using-polar true`
+- POLAR hook = `ef_lowmem`
+- bitscom DP communication = 4-bit
+- run label = `polar_bitscom_1f1b_tp`
 
 ```bash
 # node 0
@@ -27,26 +33,33 @@ bash experiments/qwen14b/0_train_qwen14b_polar_dp_pp_tp.sh
 bash experiments/qwen14b/1_train_qwen14b_polar_dp_pp_tp.sh
 ```
 
-Override the launch address if needed:
+## Dense DP Baseline
+
+This baseline uses the same 1F1B + TP topology but disables POLAR and bitscom:
+
+- `--using-polar false`
+- dense DP gradient averaging after each stage finishes 1F1B backward
+- run label = `baseline_ddp_1f1b_tp`
+
+The synchronization point is the same place DDP would synchronize gradients,
+but it is implemented as explicit dense DP all-reduce to avoid wrapping
+`PipelineStage` with DDP.
+
+```bash
+# node 0
+bash experiments/qwen14b/0_train_qwen14b_baseline_ddp_1f1b_tp.sh
+
+# node 1
+bash experiments/qwen14b/1_train_qwen14b_baseline_ddp_1f1b_tp.sh
+```
+
+Override launch address/port if needed:
 
 ```bash
 MASTER_ADDR=<node0_ip> MASTER_PORT=11234 bash experiments/qwen14b/0_train_qwen14b_polar_dp_pp_tp.sh
 MASTER_ADDR=<node0_ip> MASTER_PORT=11234 bash experiments/qwen14b/1_train_qwen14b_polar_dp_pp_tp.sh
 ```
 
-If the Hugging Face cache is already present and the run should stay fully
-offline, add `--hf-local-files-only` to both launch scripts.
-
-## TODO
-
-- [x] Fix the double label-shift bug: the dataset previously emitted shifted
-  labels, while the loss function shifts logits/labels again.
-- [x] Complete TP support: decoder layers and the final `lm_head` participate
-  in tensor parallelism. The `lm_head` output stays vocab-sharded and the loss
-  uses vocab-parallel cross entropy, avoiding the unsupported replicated-output
-  all-gather path.
-- [ ] Continue investigating memory imbalance: explain why stage 0 ranks use
-  much more memory than other PP stages under the 2TP + 8PP layout. The
-  training wrapper now prints per-stage parameter and CUDA memory snapshots.
-- [ ] Leave `ef_lowmem` unchanged for this issue. It is the intended innovation
-  path and is not considered the active cause of the current abnormal run.
+For the baseline scripts, use the same override pattern with
+`0_train_qwen14b_baseline_ddp_1f1b_tp.sh` and
+`1_train_qwen14b_baseline_ddp_1f1b_tp.sh`.
