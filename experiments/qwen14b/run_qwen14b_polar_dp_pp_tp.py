@@ -343,6 +343,11 @@ def partition_qwen_model(
         if rotary_emb is not None:
             return rotary_emb.to(device)
 
+        rotary_emb = build_rotary_embedding(device)
+        model.model._polar_rotary_emb = rotary_emb
+        return rotary_emb
+
+    def build_rotary_embedding(device):
         import inspect
         from transformers.models.qwen2.modeling_qwen2 import Qwen2RotaryEmbedding
 
@@ -367,8 +372,25 @@ def partition_qwen_model(
             rotary_emb = Qwen2RotaryEmbedding(head_dim, **kwargs)
 
         rotary_emb = rotary_emb.to(device)
-        model.model._polar_rotary_emb = rotary_emb
         return rotary_emb
+
+    def ensure_layer_rotary_embedding(layer, device):
+        self_attn = getattr(layer, "self_attn", None)
+        if self_attn is None or not hasattr(self_attn, "rotary_emb"):
+            return
+
+        rotary_emb = getattr(self_attn, "rotary_emb", None)
+        needs_rebuild = rotary_emb is None
+        if rotary_emb is not None:
+            for buffer in rotary_emb.buffers():
+                if torch.is_floating_point(buffer) and not bool(torch.isfinite(buffer).all().item()):
+                    needs_rebuild = True
+                    break
+
+        if needs_rebuild:
+            self_attn.rotary_emb = build_rotary_embedding(device)
+        else:
+            self_attn.rotary_emb = rotary_emb.to(device)
 
     def apply_rotary_embedding(rotary_emb, hidden_states, position_ids, seq_length):
         import inspect
@@ -444,6 +466,7 @@ def partition_qwen_model(
             if isinstance(layer, torch.nn.Identity):
                 hidden_states = layer(hidden_states)
             else:
+                ensure_layer_rotary_embedding(layer, hidden_states.device)
                 # Pass position_embeddings to Qwen2 layers
                 layer_outputs = layer(
                     hidden_states, 
