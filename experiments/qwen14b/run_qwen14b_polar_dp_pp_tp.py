@@ -551,6 +551,25 @@ def main():
         default=0.9,
         help="EMA momentum beta for polar_hook=momentum.",
     )
+    parser.add_argument(
+        "--polar-bucket-numel",
+        type=int,
+        default=4_000_000,
+        help=(
+            "Maximum elements per ef_lowmem POLAR DP communication bucket. "
+            "Large parameters are split so bitscom never quantizes a full "
+            "stage-sized bf16 buffer at once."
+        ),
+    )
+    parser.add_argument(
+        "--polar-max-inflight-buckets",
+        type=int,
+        default=1,
+        help=(
+            "Maximum ef_lowmem buckets kept alive at the same time. Keep this "
+            "at 1 for the lowest memory footprint."
+        ),
+    )
     
     # Baseline mode
     parser.add_argument(
@@ -615,6 +634,10 @@ def main():
             f"--comm-timing must be -1 or in [0, {args.micro_batches - 1}], "
             f"got {args.comm_timing}."
         )
+    if args.polar_bucket_numel <= 0:
+        raise ValueError("--polar-bucket-numel must be positive")
+    if args.polar_max_inflight_buckets <= 0:
+        raise ValueError("--polar-max-inflight-buckets must be positive")
     if args.dataset_cache_samples <= 0:
         args.dataset_cache_samples = max(
             args.max_steps * args.per_device_batch_size,

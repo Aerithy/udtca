@@ -41,5 +41,7 @@ torchrun \
   --dataset-name-or-path HuggingFaceFW/fineweb \
   --text-field text \
   --polar-hook ef_lowmem \
+  --polar-bucket-numel 4000000 \
+  --polar-max-inflight-buckets 1 \
   --method bitscom \
   --bitwidth 4
