@@ -11,17 +11,27 @@ export NCCL_SOCKET_IFNAME="${NCCL_SOCKET_IFNAME:-ens1f0}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "${SCRIPT_DIR}"
 
+extra_args=()
+if [[ "${DISABLE_PROFILER:-1}" == "1" ]]; then
+    extra_args+=(--disable-profiler)
+fi
+
 torchrun --nproc_per_node="${NPROC_PER_NODE:-8}" \
     --nnodes="${NNODES:-2}" \
     --node_rank="${NODE_RANK:-0}" \
     --master_addr="${MASTER_ADDR:-10.31.10.210}" \
     --master_port="${MASTER_PORT:-29500}" \
-    run_llama7b_dp_pp.py \
+    run_llama7b_polar_dp_pp.py \
     --batch-size "${BATCH_SIZE:-16}" \
+    --train-mode baseline \
+    --baseline-mode "${BASELINE_MODE:-manual}" \
+    --comm-timing "${COMM_TIMING:-4}" \
+    --method "${METHOD:-none}" \
+    --run-label "${RUN_LABEL:-baseline_wrapper_no_bitscom}" \
+    --step-log-dir "${STEP_LOG_DIR:-outputs/step_csv}" \
     --pp-size "${PP_SIZE:-8}" \
     --lr "${LR:-2e-5}" \
-    --methods "${METHOD:-none}" \
     --micro-batches "${MICRO_BATCHES:-16}" \
     --max-steps "${MAX_STEPS:-100}" \
     --seq-length "${SEQ_LENGTH:-640}" \
-    --out-dir "${OUT_DIR:-experiments/results}"
+    "${extra_args[@]}"
