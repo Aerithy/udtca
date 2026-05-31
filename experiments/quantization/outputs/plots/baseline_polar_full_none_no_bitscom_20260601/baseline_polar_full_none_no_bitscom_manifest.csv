@@ -1,0 +1,4 @@
+key,label,source_csv,final_step,final_elapsed_s,final_loss
+baseline,Baseline wrapper (no bitscom),experiments/quantization/outputs/step_csv/baseline_wrapper_no_bitscom_2026-05-31_13-06_dp2_pp8_tp1.csv,99,1504.9927905779332,4.212266951
+polar_full,Full POLAR (no bitscom),experiments/quantization/outputs/step_csv/polar_full_no_bitscom_2026-05-31_09-09_dp2_pp8_tp1.csv,99,1504.9927905779332,4.254815101623535
+no_error_feedback_no_gradient_scaling,POLAR w/o EF + Scaling (no bitscom),experiments/quantization/outputs/step_csv/polar_none_no_bitscom_2026-05-31_09-37_dp2_pp8_tp1.csv,99,1536.0638982260134,4.475003719329834
