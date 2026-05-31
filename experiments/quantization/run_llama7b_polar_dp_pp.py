@@ -1,7 +1,9 @@
 import argparse
 import os
+import random
 from typing import Optional
 
+import numpy as np
 import torch
 import torch.distributed as dist
 import torch.nn.functional as F
@@ -75,6 +77,7 @@ def get_dataloader(
     split: str,
     use_auth_token: bool,
     allow_download: bool,
+    seed: int,
 ):
     """Build a dataloader with optional distributed sampling for DP+PP."""
     download_cfg = DownloadConfig(local_files_only=not allow_download)
@@ -130,8 +133,11 @@ def get_dataloader(
             num_replicas=dist.get_world_size() // pp_size,
             rank=dist.get_rank() // pp_size,
             shuffle=True,
+            seed=seed,
         )
 
+    generator = torch.Generator()
+    generator.manual_seed(seed)
     dataloader = DataLoader(
         tokenized_dataset,
         batch_size=batch_size,
@@ -140,6 +146,7 @@ def get_dataloader(
         num_workers=num_workers,
         pin_memory=True,
         drop_last=True,
+        generator=generator,
     )
     return dataloader, tokenizer
 
@@ -235,12 +242,21 @@ class CompressedPolarParallel(PolarParallel):
             self._train()
 
 
+def set_reproducibility_seed(seed: int) -> None:
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Llama7B DP+PP (Polar + bitscom)")
     parser.add_argument("--epochs", type=int, default=1)
     parser.add_argument("--batch-size", "--batch_size", dest="batch_size", type=int, default=1)
     parser.add_argument("--seq-length", "--seq_length", dest="seq_length", type=int, default=1024)
     parser.add_argument("--lr", type=float, default=1e-5)
+    parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--grad-clip-norm", "--grad_clip_norm", dest="grad_clip_norm", type=float, default=1.0)
     parser.add_argument("--dataset", type=str, default="wikitext")
     parser.add_argument(
@@ -273,10 +289,11 @@ def main():
         "--polar-hook",
         "--polar_hook",
         dest="polar_hook",
-        choices=["io", "momentum", "gpipe", "ef_only", "scaling_only", "none"],
+        choices=["io", "momentum", "gpipe", "ef_only", "ef_lowmem", "scaling_only", "none"],
         default="io",
         help=(
             "Polar hook variant. Ablations: ef_only disables gradient scaling; "
+            "ef_lowmem uses error feedback without grads_pred buffers; "
             "scaling_only disables error feedback; none disables both."
         ),
     )
@@ -357,6 +374,7 @@ def main():
 
     if not torch.cuda.is_available():
         raise RuntimeError("CUDA is required")
+    set_reproducibility_seed(args.seed)
 
     if args.method != "none":
         if args.train_mode == "polar" and args.method != "bitscom":
@@ -448,6 +466,7 @@ def main():
         split="train",
         use_auth_token=args.use_auth_token,
         allow_download=not args.no_download,
+        seed=args.seed,
     )
     eval_dataloader: Optional[DataLoader] = None
     if args.eval_split:
@@ -462,6 +481,7 @@ def main():
             split=args.eval_split,
             use_auth_token=args.use_auth_token,
             allow_download=not args.no_download,
+            seed=args.seed,
         )
     elif args.train_val_ratio and args.train_val_ratio > 0:
         from torch.utils.data import random_split
@@ -469,8 +489,16 @@ def main():
         n = len(dataloader.dataset)
         n_val = max(1, int(n * args.train_val_ratio))
         n_train = n - n_val
-        train_ds, val_ds = random_split(dataloader.dataset, [n_train, n_val])
+        split_generator = torch.Generator()
+        split_generator.manual_seed(args.seed)
+        train_ds, val_ds = random_split(
+            dataloader.dataset,
+            [n_train, n_val],
+            generator=split_generator,
+        )
 
+        train_generator = torch.Generator()
+        train_generator.manual_seed(args.seed)
         dataloader = DataLoader(
             train_ds,
             batch_size=args.batch_size,
@@ -478,6 +506,7 @@ def main():
             num_workers=2,
             pin_memory=True,
             drop_last=True,
+            generator=train_generator,
         )
         eval_dataloader = DataLoader(
             val_ds,
@@ -486,6 +515,7 @@ def main():
             num_workers=2,
             pin_memory=True,
             drop_last=False,
+            generator=train_generator,
         )
 
     def loss_fn(output, target):

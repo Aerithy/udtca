@@ -34,6 +34,8 @@ run_polar() {
         --step-log-dir "${STEP_LOG_DIR:-outputs/step_csv}" \
         --pp-size "${PP_SIZE:-8}" \
         --lr "${LR:-2e-5}" \
+        --seed "${SEED:-42}" \
+        --grad-clip-norm "${GRAD_CLIP_NORM:-1.0}" \
         --micro-batches "${MICRO_BATCHES:-16}" \
         --max-steps "${MAX_STEPS:-50}" \
         --seq-length "${SEQ_LENGTH:-640}" \

@@ -1,8 +1,10 @@
 import argparse
 import os
+import random
 import time
 from typing import List
 
+import numpy as np
 import torch
 import torch.distributed as dist
 import torch.nn as nn
@@ -84,6 +86,7 @@ def get_dataloader(
     split: str,
     use_auth_token: bool,
     allow_download: bool,
+    seed: int,
 ):
     download_cfg = DownloadConfig(local_files_only=not allow_download)
     try:
@@ -138,8 +141,11 @@ def get_dataloader(
             num_replicas=dist.get_world_size() // pp_size,
             rank=dist.get_rank() // pp_size,
             shuffle=True,
+            seed=seed,
         )
 
+    generator = torch.Generator()
+    generator.manual_seed(seed)
     dataloader = DataLoader(
         tokenized_dataset,
         batch_size=batch_size,
@@ -148,6 +154,7 @@ def get_dataloader(
         num_workers=num_workers,
         pin_memory=True,
         drop_last=True,
+        generator=generator,
     )
     return dataloader, tokenizer
 
@@ -191,11 +198,21 @@ def partition_llama_model(config: LlamaConfig, stage_idx: int, num_stages: int):
 
 def init_llama_weights(module: nn.Module) -> None:
     if isinstance(module, nn.Linear):
-        nn.init.xavier_uniform_(module.weight)
+        nn.init.normal_(module.weight, mean=0.0, std=0.02)
+        if module.bias is not None:
+            nn.init.zeros_(module.bias)
     elif isinstance(module, nn.Embedding):
         nn.init.normal_(module.weight, mean=0.0, std=0.02)
     elif isinstance(module, RMSNorm):
         nn.init.ones_(module.weight)
+
+
+def set_reproducibility_seed(seed: int) -> None:
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
 
 
 @torch.no_grad()
@@ -278,6 +295,8 @@ def main() -> None:
     parser.add_argument("--batch-size", type=int, default=1)
     parser.add_argument("--seq-length", type=int, default=1024)
     parser.add_argument("--lr", type=float, default=1e-4)
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--grad-clip-norm", type=float, default=1.0)
     parser.add_argument("--dataset", type=str, default="wikitext")
     parser.add_argument("--dataset-config", type=str, default="wikitext-103-raw-v1")
     parser.add_argument("--tokenizer", type=str, default="hf-internal-testing/llama-tokenizer")
@@ -299,6 +318,7 @@ def main() -> None:
 
     if not torch.cuda.is_available():
         raise RuntimeError("CUDA is required")
+    set_reproducibility_seed(args.seed)
 
     dist.init_process_group(backend="nccl", init_method="env://")
     world_size = dist.get_world_size()
@@ -341,6 +361,7 @@ def main() -> None:
         split="train",
         use_auth_token=args.use_auth_token,
         allow_download=not args.no_download,
+        seed=args.seed,
     )
 
     def loss_fn(output, target):
@@ -355,6 +376,7 @@ def main() -> None:
     dp_rank = dp_mesh.get_local_rank()
 
     for method in args.methods:
+        set_reproducibility_seed(args.seed)
         stage_idx = pp_mesh.get_local_rank()
         stage_model = partition_llama_model(
             LlamaConfig(
@@ -390,7 +412,11 @@ def main() -> None:
             powersgd_dim=args.powersgd_dim,
         )
 
-        optimizer = torch.optim.AdamW(stage.submod.parameters(), lr=args.lr)
+        optimizer = torch.optim.AdamW(
+            stage.submod.parameters(),
+            lr=args.lr,
+            foreach=False,
+        )
         micro_batches = min(int(args.micro_batches), int(args.batch_size))
         if micro_batches < pp_size:
             raise ValueError(
@@ -483,6 +509,12 @@ def main() -> None:
                     bucket_numel=args.bucket_numel,
                     lowbit_group=lowbit_group,
                 )
+
+                if args.grad_clip_norm > 0:
+                    torch.nn.utils.clip_grad_norm_(
+                        stage.submod.parameters(),
+                        max_norm=float(args.grad_clip_norm),
+                    )
 
                 step_log_idx = global_step
                 optimizer.step()
