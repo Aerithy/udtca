@@ -542,7 +542,7 @@ def main():
     stage_model = partition_llama_model(
         LlamaConfig(
             vocab_size=32000,
-            hidden_size=4096,
+            hidden_size=2048,
             intermediate_size=11008,
             num_hidden_layers=32,
             num_attention_heads=32,
