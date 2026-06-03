@@ -24,7 +24,7 @@ BURST="32kbit"
 LATENCY="400ms"
 
 # 网络传播时延
-DELAY="20ms"
+DELAY="0ms"
 
 start_tc() {
     echo "[INFO] 开始配置 tc ..."
