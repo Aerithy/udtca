@@ -732,6 +732,46 @@ def main():
         default=0,
         help="Print parameter and batch finite/range checks for the first N steps.",
     )
+    parser.add_argument(
+        "--disable-profiler",
+        type=str_to_bool,
+        default=False,
+        help="Disable torch profiler trace generation.",
+    )
+    parser.add_argument("--profiler-wait-steps", type=int, default=1)
+    parser.add_argument("--profiler-warmup-steps", type=int, default=1)
+    parser.add_argument(
+        "--profiler-active-steps",
+        type=int,
+        default=1,
+        help="Number of steps recorded into each profiler trace.",
+    )
+    parser.add_argument("--profiler-repeat", type=int, default=1)
+    parser.add_argument(
+        "--profiler-memory",
+        type=str_to_bool,
+        default=False,
+        help="Record memory events in profiler traces. This can make traces large.",
+    )
+    parser.add_argument(
+        "--profiler-shapes",
+        type=str_to_bool,
+        default=False,
+        help="Record tensor shapes in profiler traces. This can make traces large.",
+    )
+    parser.add_argument(
+        "--profiler-stack",
+        type=str_to_bool,
+        default=False,
+        help="Record Python stacks in profiler traces. This can make traces large.",
+    )
+    parser.add_argument("--profiler-flops", type=str_to_bool, default=False)
+    parser.add_argument(
+        "--profiler-acc-events",
+        type=str_to_bool,
+        default=False,
+        help="Accumulate profiler events across cycles. Disabled by default to keep traces small.",
+    )
     
     # Data loader
     parser.add_argument("--num-workers", type=int, default=2)
@@ -887,6 +927,14 @@ def main():
         raise ValueError("--polar-bucket-numel must be positive")
     if args.polar_max_inflight_buckets <= 0:
         raise ValueError("--polar-max-inflight-buckets must be positive")
+    if args.profiler_wait_steps < 0:
+        raise ValueError("--profiler-wait-steps must be non-negative")
+    if args.profiler_warmup_steps < 0:
+        raise ValueError("--profiler-warmup-steps must be non-negative")
+    if args.profiler_active_steps <= 0:
+        raise ValueError("--profiler-active-steps must be positive")
+    if args.profiler_repeat <= 0:
+        raise ValueError("--profiler-repeat must be positive")
     if args.dataset_cache_samples <= 0:
         args.dataset_cache_samples = max(
             args.max_steps * args.per_device_batch_size,

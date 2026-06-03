@@ -44,6 +44,6 @@ torchrun \
   --run-label polar_bitscom_1f1b_tp \
   --polar-hook ef_lowmem \
   --polar-bucket-numel 32000000 \
-  --polar-max-inflight-buckets 2 \
+  --polar-max-inflight-buckets 4 \
   --method bitscom \
   --bitwidth 4
