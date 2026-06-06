@@ -51,6 +51,24 @@ def import_bitscom():
         return bitscom
 
 
+def create_lowbit_dp_group(dp_group):
+    """Create lowbit backend DP groups in a globally consistent order."""
+    my_ranks = tuple(int(r) for r in dist.get_process_group_ranks(dp_group))
+    gathered = [None for _ in range(dist.get_world_size())]
+    dist.all_gather_object(gathered, my_ranks)
+    dp_rank_groups = sorted({tuple(int(r) for r in ranks) for ranks in gathered})
+
+    selected_group = None
+    for ranks in dp_rank_groups:
+        group = dist.new_group(ranks=list(ranks), backend="lowbit")
+        if ranks == my_ranks:
+            selected_group = group
+
+    if selected_group is None:
+        raise RuntimeError(f"failed to create lowbit DP group for ranks={my_ranks}")
+    return selected_group
+
+
 def str_to_bool(value):
     if isinstance(value, bool):
         return value
@@ -996,6 +1014,10 @@ def main():
     local_rank = int(os.environ["LOCAL_RANK"])
     device = torch.device(f"cuda:{local_rank}")
     torch.cuda.set_device(device)
+
+    lowbit_dp_group = None
+    if args.method == "bitscom":
+        lowbit_dp_group = create_lowbit_dp_group(dp_mesh.get_group())
     
     # Enable TF32 for better performance
     torch.backends.cuda.matmul.allow_tf32 = True
@@ -1056,16 +1078,18 @@ def main():
     if args.method == "bitscom":
         lowbit_group = bitscom_module.LowBitGroup(
             bitwidth=args.bitwidth,
-            process_group=dp_mesh.get_group(),
+            process_group=lowbit_dp_group,
             simulate_quantization=args.simulate_quantization,
             stochastic_rounding=args.stochastic_rounding,
+            backend_allreduce=True,
         )
         if dist.get_rank() == 0:
             print(
                 "[bitscom] enabled for POLAR DP communication: "
                 f"bitwidth={args.bitwidth} "
                 f"simulate_quantization={args.simulate_quantization} "
-                f"stochastic_rounding={args.stochastic_rounding}",
+                f"stochastic_rounding={args.stochastic_rounding} "
+                "backend_allreduce=True",
                 flush=True,
             )
     
