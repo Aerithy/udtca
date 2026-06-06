@@ -1014,6 +1014,12 @@ def main():
     local_rank = int(os.environ["LOCAL_RANK"])
     device = torch.device(f"cuda:{local_rank}")
     torch.cuda.set_device(device)
+    print(
+        "[qwen14b-process] "
+        f"rank={dist.get_rank()} local_rank={local_rank} "
+        f"pid={os.getpid()} host={socket.gethostname()}",
+        flush=True,
+    )
 
     lowbit_dp_group = None
     if args.method == "bitscom":
