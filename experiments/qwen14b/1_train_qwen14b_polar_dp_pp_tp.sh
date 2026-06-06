@@ -41,7 +41,7 @@ torchrun \
   --text-field text \
   --using-polar true \
   --run-label polar_bitscom_1f1b_tp \
-  --polar-hook ef_full_async_launch \
+  --polar-hook ef_lowmem \
   --polar-bucket-numel 64000000 \
   --polar-max-inflight-buckets 4 \
   --method bitscom \
